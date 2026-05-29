@@ -110,6 +110,13 @@ def build_parser() -> argparse.ArgumentParser:
     serial_send.add_argument("--json", action="store_true", help="Print machine-readable send result")
     serial_send.set_defaults(handler=cmd_serial_send)
 
+    gamepad = sub.add_parser("gamepad", help="Gamepad discovery and ROS routing helpers")
+    gamepad_sub = gamepad.add_subparsers(dest="gamepad_command")
+    gamepad_status = gamepad_sub.add_parser("status", help="Show wired, WSL-native, and Bluetooth gamepad routes")
+    gamepad_status.add_argument("--config", help="Path to hurry.toml")
+    gamepad_status.add_argument("--json", action="store_true", help="Print machine-readable gamepad status")
+    gamepad_status.set_defaults(handler=cmd_gamepad_status)
+
     ros = sub.add_parser("ros", help="ROS integration helpers")
     ros_sub = ros.add_subparsers(dest="ros_command")
     export = ros_sub.add_parser("export", help="Export ROS launch/env values from discovered devices")
@@ -365,6 +372,66 @@ def cmd_serial_send(args: argparse.Namespace) -> int:
             if result.response_text.strip():
                 print(f"text: {result.response_text.rstrip()}")
     return 0
+
+
+def cmd_gamepad_status(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    result = scan_devices(config)
+    items = [gamepad_status_item(device) for device in result.devices if device.kind == "gamepad"]
+
+    if args.json:
+        print(json.dumps({"gamepads": items, "warnings": result.warnings}, indent=2, sort_keys=True))
+        return 0
+
+    if not items:
+        print("No gamepads found.")
+        return 0
+    for item in items:
+        endpoint = item.get("path") or item.get("bus_id") or item.get("endpoint") or "-"
+        print(f"{item['route']:22} {item['state']:12} {endpoint}  {item['name']}")
+        print(f"  action: {item['action']}")
+    return 0
+
+
+def gamepad_status_item(device: DeviceDescriptor) -> dict[str, object]:
+    if device.locality == "wsl_native" and device.stable_path:
+        return {
+            "id": device.id,
+            "name": device.name,
+            "state": device.state,
+            "route": "wsl_native",
+            "path": device.stable_path,
+            "latency_class": "native",
+            "action": f"use ROS joy/joy_linux with dev:={device.stable_path}",
+        }
+    if device.bus_id:
+        return {
+            "id": device.id,
+            "name": device.name,
+            "state": device.state,
+            "route": "usbipd_attach",
+            "bus_id": device.bus_id,
+            "latency_class": "near_native",
+            "action": f"hurry attach {device.bus_id}",
+        }
+    bridge = next((transport for transport in device.transports if transport.kind == "windows_input_bridge"), None)
+    if bridge:
+        return {
+            "id": device.id,
+            "name": device.name,
+            "state": device.state,
+            "route": "windows_input_bridge",
+            "endpoint": bridge.endpoint,
+            "latency_class": bridge.latency_class,
+            "action": "planned v2 bridge; use wired USB attach for v1 low-latency testing",
+        }
+    return {
+        "id": device.id,
+        "name": device.name,
+        "state": device.state,
+        "route": "unknown",
+        "action": device.recommendation or "run hurry scan --json for details",
+    }
 
 
 def cmd_ros_export(args: argparse.Namespace) -> int:

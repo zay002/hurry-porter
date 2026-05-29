@@ -25,6 +25,7 @@
 - `hurry watch`：周期扫描设备，并可对 `hurry.toml` 中标记的设备自动 attach。
 - `hurry ros export`：导出 ROS 2 launch/env/params/launch-file 可消费的串口、手柄、LAN 参数。
 - `hurry serial send`：向 WSL 串口写入一帧 text/hex 协议，并可短暂读取回应。
+- `hurry gamepad status`：区分 WSL 原生手柄、可 attach 的 USB 手柄和待 v2 桥接的 Windows 蓝牙/HID 手柄。
 - `hurry_porter_cpp`：ROS 2 C++ 扩展点，用于后续 GameInput / Hyper-V sockets / Windows-only 输入桥接。
 
 ## 快速开始
@@ -99,6 +100,7 @@ source install/setup.bash
 ```bash
 hurry doctor
 hurry scan --json
+hurry gamepad status --json
 ```
 
 ### 6. 配置设备角色
@@ -205,6 +207,12 @@ hurry attach <busid>
 蓝牙手柄在 v1 中不会通过 attach 蓝牙适配器解决；优先测试 USB 有线手柄或 USB 串口/CAN 设备。Windows-only 蓝牙/XInput/GameInput 桥接属于后续 C++ agent 路线。
 如果 `hurry scan --json` 能看到 `windows_input_bridge`，表示手柄已经在 Windows 侧连接成功，但还没有 WSL native `/dev/input/js*` 路径。
 
+用 `hurry gamepad status` 可以直接看当前路线：
+
+- `wsl_native`：已经是 `/dev/input/js*`，可直接给 ROS `joy` / `joy_linux`。
+- `usbipd_attach`：有线 USB 手柄还在 Windows 侧，先 `hurry attach <busid>`。
+- `windows_input_bridge`：蓝牙/HID 手柄在 Windows 侧可见，v1 只报告状态，v2 做输入桥接。
+
 ### USB-CAN 已经是串口设备
 
 很多 USB-CAN 适配器有自己的转换芯片和上位机协议。只要 WSL 中已经看到 `/dev/ttyUSB0` 或 `/dev/serial/by-id/...`，v1 就直接发送厂商协议帧：
@@ -283,6 +291,7 @@ Many robotics developers run ROS 2 inside WSL2 on a Windows laptop while control
 - `hurry watch`: periodically scans devices and can auto-attach devices marked in `hurry.toml`.
 - `hurry ros export`: exports serial, gamepad, and LAN values for ROS 2 launch/env/params/launch-file usage.
 - `hurry serial send`: writes one text/hex protocol frame to a WSL serial port and can briefly read a response.
+- `hurry gamepad status`: separates WSL-native gamepads, attachable USB gamepads, and Windows Bluetooth/HID gamepads planned for the v2 bridge.
 - `hurry_porter_cpp`: ROS 2 C++ extension point for future GameInput / Hyper-V sockets / Windows-only input bridges.
 
 ## Quick Start
@@ -349,6 +358,7 @@ Diagnose and scan:
 ```bash
 hurry doctor
 hurry scan --json
+hurry gamepad status --json
 ```
 
 Create a local config:
@@ -407,6 +417,12 @@ hurry attach <busid>
 
 Bluetooth gamepads are not solved in v1 by attaching the Bluetooth adapter. Prefer a wired USB controller or USB serial/CAN device for v1 validation. Windows-only Bluetooth/XInput/GameInput bridging belongs to the later C++ agent path.
 If `hurry scan --json` shows `windows_input_bridge`, the controller is connected on Windows, but there is still no WSL native `/dev/input/js*` path yet.
+
+Use `hurry gamepad status` to see the current route:
+
+- `wsl_native`: already exposed as `/dev/input/js*`, ready for ROS `joy` / `joy_linux`.
+- `usbipd_attach`: wired USB controller is still on Windows; run `hurry attach <busid>`.
+- `windows_input_bridge`: Bluetooth/HID controller is visible on Windows; v1 reports it and v2 will bridge it.
 
 ### USB-CAN is a serial protocol device
 

@@ -1,7 +1,7 @@
 import json
 
 from hurry_porter.cli import main
-from hurry_porter.models import DeviceDescriptor, ScanResult
+from hurry_porter.models import DeviceDescriptor, ScanResult, TransportCandidate
 from hurry_porter.serial_setup import KernelModuleStatus, SerialDriverGuide, SerialSetupReport, WindowsComPort
 from hurry_porter.windows_setup import SetupResult
 
@@ -118,6 +118,61 @@ def test_serial_send_json_dry_run_uses_single_serial_candidate(monkeypatch, caps
     assert output["dry_run"] is True
     assert output["port"] == "/dev/serial/by-id/usb-can"
     assert output["payload_hex"] == "01 02 0a"
+
+
+def test_gamepad_status_json_reports_native_usb_and_bluetooth_routes(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "hurry_porter.cli.scan_devices",
+        lambda config: ScanResult(
+            devices=[
+                DeviceDescriptor(
+                    id="input:js0",
+                    kind="gamepad",
+                    locality="wsl_native",
+                    state="present",
+                    name="USB Gamepad",
+                    stable_path="/dev/input/js0",
+                ),
+                DeviceDescriptor(
+                    id="usbipd:4-1",
+                    kind="gamepad",
+                    locality="windows_host",
+                    state="Shared",
+                    name="Xbox Controller",
+                    bus_id="4-1",
+                ),
+                DeviceDescriptor(
+                    id="windows-gamepad:pro",
+                    kind="gamepad",
+                    locality="windows_host",
+                    state="OK",
+                    name="Pro Controller",
+                    transports=[
+                        TransportCandidate(
+                            kind="windows_input_bridge",
+                            endpoint="BTHENUM\\DEV_01",
+                            priority=30,
+                            latency_class="bridge_planned",
+                        )
+                    ],
+                ),
+            ],
+            warnings=[],
+        ),
+    )
+
+    exit_code = main(["gamepad", "status", "--json"])
+    output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert [item["route"] for item in output["gamepads"]] == [
+        "wsl_native",
+        "usbipd_attach",
+        "windows_input_bridge",
+    ]
+    assert output["gamepads"][0]["path"] == "/dev/input/js0"
+    assert output["gamepads"][1]["bus_id"] == "4-1"
+    assert "v2 bridge" in output["gamepads"][2]["action"]
 
 
 def test_scan_json_prints_devices_and_warnings(monkeypatch, capsys):

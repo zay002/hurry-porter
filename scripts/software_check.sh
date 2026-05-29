@@ -20,6 +20,7 @@ hurry init --print >/dev/null
 hurry setup usbipd --json >/dev/null || true
 hurry setup serial --json >/dev/null
 hurry serial send --port /dev/null --hex "01 02" --dry-run --json >/dev/null
+hurry gamepad status --json >/dev/null
 hurry scan --json >/dev/null
 hurry watch --once --json --no-attach >/dev/null
 hurry ros export --format json >/dev/null
