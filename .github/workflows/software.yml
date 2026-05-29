@@ -47,6 +47,7 @@ jobs:
           hurry init --print
           hurry setup usbipd --json || true
           hurry setup serial --json
+          hurry serial send --port /dev/null --hex "01 02" --dry-run --json
           hurry scan --json
           hurry watch --once --json --no-attach
           hurry ros export --format json
