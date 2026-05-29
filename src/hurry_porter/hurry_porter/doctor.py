@@ -118,6 +118,6 @@ def collect_doctor_report() -> DoctorReport:
 
     warnings = [
         "USB bind is persistent but requires elevated Windows privileges; attach is non-persistent.",
-        "Bluetooth/XInput/GameInput controllers are reported in v1 but native Windows bridging is planned for v2.",
+        "Bluetooth/HID controllers usually stay on Windows; use `hurry gamepad bridge` plus `hurry gamepad start-agent` for ROS Joy.",
     ]
     return DoctorReport(checks=checks, warnings=warnings)

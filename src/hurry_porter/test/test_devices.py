@@ -114,7 +114,7 @@ def test_parse_windows_gamepads_prefers_named_controller():
     assert devices[0].kind == "gamepad"
     assert devices[0].locality == "windows_host"
     assert devices[0].transports[0].kind == "windows_input_bridge"
-    assert "future Windows input bridge" in devices[0].transports[0].warnings[0]
+    assert "hurry gamepad bridge" in devices[0].transports[0].warnings[0]
 
 
 def test_scan_windows_gamepads_uses_powershell(monkeypatch):
@@ -156,4 +156,3 @@ def test_scan_windows_serial_ports_reports_missing_bus_id(monkeypatch):
     assert devices[0].bus_id is None
     assert devices[0].transports[0].kind == "windows_com_pending"
     assert "no attachable bus id" in devices[0].transports[0].warnings[0]
-

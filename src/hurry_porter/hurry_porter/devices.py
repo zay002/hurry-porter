@@ -202,13 +202,13 @@ def parse_windows_gamepads(text: str) -> list[DeviceDescriptor]:
                         kind="windows_input_bridge",
                         endpoint=instance_id,
                         priority=30,
-                        latency_class="bridge_planned",
+                        latency_class="udp_bridge",
                         warnings=[
-                            "Windows Bluetooth/HID gamepad is visible, but WSL native /dev/input support requires a future Windows input bridge or USB attach"
+                            "Windows Bluetooth/HID gamepad is visible; use `hurry gamepad bridge` plus `hurry gamepad start-agent` to publish ROS Joy"
                         ],
                     )
                 ],
-                recommendation="use a wired USB attach path for v1, or the planned Windows input bridge in v2",
+                recommendation="use the v2 Windows gamepad bridge, or attach wired USB gamepads through usbipd when available",
             )
         )
     return devices

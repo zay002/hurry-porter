@@ -152,7 +152,7 @@ def test_gamepad_status_json_reports_native_usb_and_bluetooth_routes(monkeypatch
                             kind="windows_input_bridge",
                             endpoint="BTHENUM\\DEV_01",
                             priority=30,
-                            latency_class="bridge_planned",
+                            latency_class="udp_bridge",
                         )
                     ],
                 ),
@@ -172,7 +172,47 @@ def test_gamepad_status_json_reports_native_usb_and_bluetooth_routes(monkeypatch
     ]
     assert output["gamepads"][0]["path"] == "/dev/input/js0"
     assert output["gamepads"][1]["bus_id"] == "4-1"
-    assert "v2 bridge" in output["gamepads"][2]["action"]
+    assert "hurry gamepad bridge" in output["gamepads"][2]["action"]
+
+
+def test_gamepad_agent_command_json(monkeypatch, capsys):
+    monkeypatch.setattr("hurry_porter.cli.detect_wsl_target_ip", lambda: "172.20.1.2")
+    monkeypatch.setattr(
+        "hurry_porter.cli.build_agent_command",
+        lambda target, port, hz, index: [
+            "powershell.exe",
+            "-File",
+            "C:\\hurry\\agent.ps1",
+            "-Target",
+            target,
+            "-Port",
+            str(port),
+            "-Hz",
+            str(hz),
+            "-Index",
+            str(index),
+        ],
+    )
+
+    exit_code = main(["gamepad", "agent-command", "--json", "--port", "48888", "--hz", "120"])
+    output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert output["target"] == "172.20.1.2"
+    assert output["port"] == 48888
+    assert output["hz"] == 120
+    assert output["command"][0] == "powershell.exe"
+
+
+def test_gamepad_decode_json(capsys):
+    packet = '{"schema":"hurry.gamepad.v1","axes":[0.5,-0.5],"buttons":[1,0,1]}'
+
+    exit_code = main(["gamepad", "decode", "--json", "--packet", packet])
+    output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert output["axes"] == [0.5, -0.5]
+    assert output["buttons"] == [1, 0, 1]
 
 
 def test_waveshare_can_a_send_dry_run_encodes_config_and_extended_frame(capsys):

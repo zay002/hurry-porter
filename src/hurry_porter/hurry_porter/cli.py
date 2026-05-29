@@ -9,6 +9,20 @@ import time
 from .config import load_config, render_config_from_devices, render_default_config
 from .devices import scan_devices
 from .doctor import collect_doctor_report
+from .gamepad_bridge import (
+    DEFAULT_AGENT_INDEX,
+    DEFAULT_FRAME_ID,
+    DEFAULT_GAMEPAD_HZ,
+    DEFAULT_GAMEPAD_PORT,
+    DEFAULT_TOPIC,
+    build_agent_command,
+    command_to_text,
+    decode_packet_text,
+    detect_wsl_target_ip,
+    joy_state_to_jsonable,
+    run_agent_command,
+    run_ros_bridge,
+)
 from .models import DeviceDescriptor, to_jsonable
 from .ros_export import render_exports
 from .serial_io import (
@@ -128,6 +142,25 @@ def build_parser() -> argparse.ArgumentParser:
     gamepad_status.add_argument("--config", help="Path to hurry.toml")
     gamepad_status.add_argument("--json", action="store_true", help="Print machine-readable gamepad status")
     gamepad_status.set_defaults(handler=cmd_gamepad_status)
+    gamepad_agent = gamepad_sub.add_parser("agent-command", help="Print the Windows gamepad agent command")
+    add_gamepad_agent_args(gamepad_agent)
+    gamepad_agent.add_argument("--json", action="store_true", help="Print machine-readable command output")
+    gamepad_agent.set_defaults(handler=cmd_gamepad_agent_command)
+    gamepad_start = gamepad_sub.add_parser("start-agent", help="Run the Windows gamepad agent from WSL")
+    add_gamepad_agent_args(gamepad_start)
+    gamepad_start.add_argument("--dry-run", action="store_true", help="Print the command without launching PowerShell")
+    gamepad_start.add_argument("--json", action="store_true", help="Print machine-readable command output")
+    gamepad_start.set_defaults(handler=cmd_gamepad_start_agent)
+    gamepad_bridge = gamepad_sub.add_parser("bridge", help="Publish Windows gamepad packets as ROS sensor_msgs/Joy")
+    gamepad_bridge.add_argument("--bind", default="0.0.0.0", help="UDP bind address, default: 0.0.0.0")
+    gamepad_bridge.add_argument("--port", type=int, default=DEFAULT_GAMEPAD_PORT, help="UDP port to listen on")
+    gamepad_bridge.add_argument("--topic", default=DEFAULT_TOPIC, help="ROS Joy topic, default: /joy")
+    gamepad_bridge.add_argument("--frame-id", default=DEFAULT_FRAME_ID, help="ROS Joy header frame_id")
+    gamepad_bridge.set_defaults(handler=cmd_gamepad_bridge)
+    gamepad_decode = gamepad_sub.add_parser("decode", help="Decode a Windows gamepad bridge packet")
+    gamepad_decode.add_argument("--packet", required=True, help="JSON packet emitted by the Windows gamepad agent")
+    gamepad_decode.add_argument("--json", action="store_true", help="Print machine-readable decoded Joy state")
+    gamepad_decode.set_defaults(handler=cmd_gamepad_decode)
 
     waveshare = sub.add_parser("waveshare-can-a", help="Waveshare USB-CAN-A helpers")
     waveshare_sub = waveshare.add_subparsers(dest="waveshare_command")
@@ -187,6 +220,13 @@ def add_waveshare_config_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--filter-id", default="0x0", help="Acceptance filter id, default: 0")
     parser.add_argument("--mask-id", default="0x0", help="Acceptance mask id, default: 0")
     parser.add_argument("--no-auto-retransmit", action="store_true", help="Disable CAN auto retransmit")
+
+
+def add_gamepad_agent_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--target", help="WSL IPv4 address for the Windows agent to send UDP packets to")
+    parser.add_argument("--port", type=int, default=DEFAULT_GAMEPAD_PORT, help="UDP target port")
+    parser.add_argument("--hz", type=int, default=DEFAULT_GAMEPAD_HZ, help="Polling rate for Windows.Gaming.Input")
+    parser.add_argument("--index", type=int, default=DEFAULT_AGENT_INDEX, help="Windows gamepad index")
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -453,6 +493,66 @@ def cmd_gamepad_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_gamepad_agent_command(args: argparse.Namespace) -> int:
+    target = args.target or detect_wsl_target_ip()
+    command = build_agent_command(target=target, port=args.port, hz=args.hz, index=args.index)
+    payload = {
+        "target": target,
+        "port": args.port,
+        "hz": args.hz,
+        "index": args.index,
+        "command": command,
+        "shell": command_to_text(command),
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(payload["shell"])
+    return 0
+
+
+def cmd_gamepad_start_agent(args: argparse.Namespace) -> int:
+    target = args.target or detect_wsl_target_ip()
+    command = build_agent_command(target=target, port=args.port, hz=args.hz, index=args.index)
+    payload = {
+        "target": target,
+        "port": args.port,
+        "hz": args.hz,
+        "index": args.index,
+        "command": command,
+        "shell": command_to_text(command),
+        "dry_run": args.dry_run,
+    }
+    if args.dry_run:
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(payload["shell"])
+        return 0
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True), flush=True)
+    return run_agent_command(command)
+
+
+def cmd_gamepad_bridge(args: argparse.Namespace) -> int:
+    return run_ros_bridge(bind=args.bind, port=args.port, topic=args.topic, frame_id=args.frame_id)
+
+
+def cmd_gamepad_decode(args: argparse.Namespace) -> int:
+    try:
+        state = decode_packet_text(args.packet)
+    except ValueError as exc:
+        return print_error(str(exc), args.json)
+    payload = joy_state_to_jsonable(state)
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"source={state.source} index={state.index} connected={state.connected}")
+        print("axes: " + " ".join(f"{value:.4f}" for value in state.axes))
+        print("buttons: " + " ".join(str(value) for value in state.buttons))
+    return 0
+
+
 def gamepad_status_item(device: DeviceDescriptor) -> dict[str, object]:
     if device.locality == "wsl_native" and device.stable_path:
         return {
@@ -483,7 +583,7 @@ def gamepad_status_item(device: DeviceDescriptor) -> dict[str, object]:
             "route": "windows_input_bridge",
             "endpoint": bridge.endpoint,
             "latency_class": bridge.latency_class,
-            "action": "planned v2 bridge; use wired USB attach for v1 low-latency testing",
+            "action": "run `hurry gamepad bridge` in WSL and `hurry gamepad start-agent` to stream Windows Bluetooth/HID input",
         }
     return {
         "id": device.id,
