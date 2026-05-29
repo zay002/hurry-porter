@@ -12,6 +12,7 @@ from .models import DeviceDescriptor, to_jsonable
 from .ros_export import render_exports
 from .usbipd import attach as usbipd_attach
 from .usbipd import bind_command, bind_elevated
+from .windows_setup import setup_usbipd
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -59,6 +60,13 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--json", action="store_true", help="Print each scan as JSON")
     watch.add_argument("--no-attach", action="store_true", help="Do not auto-attach configured devices")
     watch.set_defaults(handler=cmd_watch)
+
+    setup = sub.add_parser("setup", help="Prepare Windows/WSL prerequisites")
+    setup_sub = setup.add_subparsers(dest="setup_command")
+    setup_usbipd_parser = setup_sub.add_parser("usbipd", help="Check or install usbipd-win through winget")
+    setup_usbipd_parser.add_argument("--run", action="store_true", help="Launch winget install instead of printing guidance")
+    setup_usbipd_parser.add_argument("--json", action="store_true", help="Print machine-readable setup output")
+    setup_usbipd_parser.set_defaults(handler=cmd_setup_usbipd)
 
     ros = sub.add_parser("ros", help="ROS integration helpers")
     ros_sub = ros.add_subparsers(dest="ros_command")
@@ -178,6 +186,23 @@ def cmd_watch(args: argparse.Namespace) -> int:
                 if device.bus_id and "not shared" not in device.state.lower():
                     usbipd_attach(device.bus_id)
         time.sleep(args.interval)
+
+
+def cmd_setup_usbipd(args: argparse.Namespace) -> int:
+    result = setup_usbipd(run=args.run)
+    if args.json:
+        print(json.dumps(to_jsonable(result), indent=2, sort_keys=True))
+    else:
+        status = "ok" if result.ok else "warn"
+        print(f"{status} {result.component}")
+        if result.stdout:
+            print(result.stdout.strip())
+        print(f"command: {result.command}")
+        if result.hint:
+            print(f"hint: {result.hint}")
+        if result.stderr:
+            print(result.stderr.strip(), file=sys.stderr)
+    return 0 if result.ok else 1
 
 
 def cmd_ros_export(args: argparse.Namespace) -> int:

@@ -35,6 +35,15 @@
 winget install --interactive --exact dorssel.usbipd-win
 ```
 
+也可以在 WSL2 中先让 `hurry` 检查并打印安装命令：
+
+```bash
+hurry setup usbipd
+hurry setup usbipd --run
+```
+
+`--run` 会通过 Windows `winget` 启动安装，可能弹出 UAC 或安装确认窗口。这一步需要人工确认。
+
 ### 2. 构建 ROS 2 workspace
 
 在 WSL2 中：
@@ -93,6 +102,17 @@ hurry ros export
 hurry ros export --format json
 hurry ros export --format launch
 ```
+
+## 手动硬件测试清单
+
+以下步骤需要真实 Windows/WSL2 机器和硬件：
+
+1. 运行 `hurry setup usbipd --run`，确认 Windows 安装器和 UAC 通过。
+2. 重新打开 WSL2，运行 `hurry doctor`，确认 `usbipd-win` 为 `ok`。
+3. 插入 USB 串口控制板或 USB 手柄，运行 `hurry scan --json`。
+4. 如果设备显示 `Not shared`，先按 `hurry attach <role|busid> --dry-run` 输出的 bind 命令在 Windows 管理员权限下 bind。
+5. 运行 `hurry attach <role|busid>`，确认 WSL2 中出现 `/dev/ttyUSB*`、`/dev/ttyACM*` 或 `/dev/input/js*`。
+6. 运行 `hurry ros export --format launch`，确认输出可以放进 ROS 2 launch 参数。
 
 ## 设计原则
 
@@ -161,6 +181,15 @@ Install `usbipd-win` from Windows PowerShell:
 winget install --interactive --exact dorssel.usbipd-win
 ```
 
+Or let `hurry` check and print the install command from WSL2:
+
+```bash
+hurry setup usbipd
+hurry setup usbipd --run
+```
+
+`--run` launches Windows `winget` and may show UAC or installer prompts. This step needs manual confirmation.
+
 Build in WSL2:
 
 ```bash
@@ -191,6 +220,17 @@ hurry ros export
 hurry ros export --format json
 hurry ros export --format launch
 ```
+
+## Manual Hardware Test Checklist
+
+These steps need a real Windows/WSL2 machine and hardware:
+
+1. Run `hurry setup usbipd --run` and approve Windows installer / UAC prompts.
+2. Restart WSL2 if needed, then run `hurry doctor` and confirm `usbipd-win` is `ok`.
+3. Plug in a USB serial controller or USB gamepad, then run `hurry scan --json`.
+4. If the device is `Not shared`, run the elevated bind command shown by `hurry attach <role|busid> --dry-run`.
+5. Run `hurry attach <role|busid>` and confirm `/dev/ttyUSB*`, `/dev/ttyACM*`, or `/dev/input/js*` appears in WSL2.
+6. Run `hurry ros export --format launch` and use the output in a ROS 2 launch flow.
 
 ## Development
 
