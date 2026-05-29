@@ -123,6 +123,14 @@ hurry ros export --format launch
 
 ## 开发与测试
 
+一键运行软件层检查，不需要连接真实硬件：
+
+```bash
+scripts/software_check.sh
+```
+
+也可以分步执行：
+
 ```bash
 source /opt/ros/jazzy/setup.bash
 colcon build
@@ -233,6 +241,14 @@ These steps need a real Windows/WSL2 machine and hardware:
 6. Run `hurry ros export --format launch` and use the output in a ROS 2 launch flow.
 
 ## Development
+
+Run software-only checks without real hardware:
+
+```bash
+scripts/software_check.sh
+```
+
+Or run the steps manually:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
