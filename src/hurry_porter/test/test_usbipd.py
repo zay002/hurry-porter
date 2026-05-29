@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from hurry_porter.usbipd import format_bind_command, parse_list
+from hurry_porter.system import CommandResult
+from hurry_porter.usbipd import format_bind_command, list_devices, parse_list, service_status, warning_lines
 from hurry_porter.devices import scan_windows_usb
 from hurry_porter.usbipd import UsbipdDevice
 
@@ -44,6 +45,53 @@ def test_format_bind_command_uses_full_windows_path():
     assert "Start-Process" in command
     assert r"C:\Program Files\usbipd-win\usbipd.exe" in command
     assert "bind --busid 1-4" in command
+
+
+def test_warning_lines_keep_successful_usbipd_warnings():
+    warnings = warning_lines("usbipd: warning: The service is currently not running; a reboot should fix that.\n")
+
+    assert warnings == ["usbipd: warning: The service is currently not running; a reboot should fix that."]
+
+
+def test_list_devices_preserves_warnings_from_stderr(monkeypatch):
+    monkeypatch.setattr("hurry_porter.usbipd.find_usbipd", lambda: "usbipd.exe")
+    monkeypatch.setattr(
+        "hurry_porter.usbipd.system.run_capture",
+        lambda args, timeout: CommandResult(
+            args=args,
+            returncode=0,
+            stdout="""
+Connected:
+BUSID  VID:PID    DEVICE                                                        STATE
+4-3    1a86:7523  USB-SERIAL CH340                                             Shared
+""",
+            stderr="usbipd: warning: The service is currently not running; a reboot should fix that.\n",
+        ),
+    )
+
+    devices, warnings = list_devices()
+
+    assert devices[0].bus_id == "4-3"
+    assert warnings == ["usbipd: warning: The service is currently not running; a reboot should fix that."]
+
+
+def test_service_status_reports_stopped_service(monkeypatch):
+    monkeypatch.setattr(
+        "hurry_porter.usbipd.system.powershell",
+        lambda script, timeout: CommandResult(
+            args=["powershell.exe"],
+            returncode=0,
+            stdout='{"Name":"usbipd","State":"Stopped","StartMode":"Auto","ExitCode":1067,"ServiceSpecificExitCode":0}',
+            stderr="",
+        ),
+    )
+
+    status = service_status()
+
+    assert status.installed is True
+    assert status.running is False
+    assert status.state == "Stopped"
+    assert status.exit_code == 1067
 
 
 def test_scan_windows_usb_classifies_serial_and_bind_warning(monkeypatch):

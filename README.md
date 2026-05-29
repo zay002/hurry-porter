@@ -142,6 +142,27 @@ hurry ros export --format launch-file --output launch/hurry.generated.launch.py
 5. 运行 `hurry attach <role|busid>`，确认 WSL2 中出现 `/dev/ttyUSB*`、`/dev/ttyACM*` 或 `/dev/input/js*`。
 6. 运行 `hurry ros export --format launch`，确认输出可以放进 ROS 2 launch 参数。
 
+## 故障排查
+
+### usbipd-win 已安装但 attach 失败
+
+如果 `hurry doctor` 显示 `usbipd_service` 为 `Stopped`，或者 `hurry scan` 输出：
+
+```text
+usbipd: warning: The service is currently not running; a reboot should fix that.
+```
+
+先重启 Windows。`usbipd-win` 安装驱动和服务后，有时必须重启才会让 `USBIP Device Host` 服务正常运行。重启后重新进入 WSL2：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+hurry doctor
+hurry attach <busid>
+```
+
+蓝牙手柄在 v1 中不会通过 attach 蓝牙适配器解决；优先测试 USB 有线手柄或 USB 串口/CAN 设备。Windows-only 蓝牙/XInput/GameInput 桥接属于后续 C++ agent 路线。
+
 ## 设计原则
 
 - **复用成熟工具**：USB 主通道使用 `usbipd-win`，不重复造 USB/IP。
@@ -274,6 +295,27 @@ These steps need a real Windows/WSL2 machine and hardware:
 4. If the device is `Not shared`, run the elevated bind command shown by `hurry attach <role|busid> --dry-run`.
 5. Run `hurry attach <role|busid>` and confirm `/dev/ttyUSB*`, `/dev/ttyACM*`, or `/dev/input/js*` appears in WSL2.
 6. Run `hurry ros export --format launch` and use the output in a ROS 2 launch flow.
+
+## Troubleshooting
+
+### usbipd-win is installed but attach fails
+
+If `hurry doctor` reports `usbipd_service` as `Stopped`, or `hurry scan` prints:
+
+```text
+usbipd: warning: The service is currently not running; a reboot should fix that.
+```
+
+Restart Windows first. After driver/service installation, `USBIP Device Host` may need a full Windows restart before attach can work. Then reopen WSL2:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+hurry doctor
+hurry attach <busid>
+```
+
+Bluetooth gamepads are not solved in v1 by attaching the Bluetooth adapter. Prefer a wired USB controller or USB serial/CAN device for v1 validation. Windows-only Bluetooth/XInput/GameInput bridging belongs to the later C++ agent path.
 
 ## Development
 

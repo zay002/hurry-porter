@@ -75,6 +75,17 @@ def collect_doctor_report() -> DoctorReport:
         )
     )
 
+    usbipd_service = usbipd.service_status()
+    checks.append(
+        DoctorCheck(
+            key="usbipd_service",
+            ok=usbipd_service.running,
+            value=usbipd_service.state,
+            detail=usbipd_service.detail or "The usbipd Windows service must be running before attach can work",
+            fix="Restart Windows after installing usbipd-win, or start the `USBIP Device Host` service as administrator.",
+        )
+    )
+
     winget_path = system.find_windows_command("winget.exe")
     checks.append(
         DoctorCheck(
@@ -110,4 +121,3 @@ def collect_doctor_report() -> DoctorReport:
         "Bluetooth/XInput/GameInput controllers are reported in v1 but native Windows bridging is planned for v2.",
     ]
     return DoctorReport(checks=checks, warnings=warnings)
-

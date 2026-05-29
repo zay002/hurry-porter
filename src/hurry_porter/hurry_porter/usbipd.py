@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import re
 
@@ -15,6 +16,15 @@ class UsbipdDevice:
     name: str
     state: str
     section: str = "connected"
+
+
+@dataclass
+class UsbipdServiceStatus:
+    installed: bool
+    running: bool
+    state: str
+    exit_code: int | None = None
+    detail: str | None = None
 
 
 BUSID_RE = re.compile(r"^\d+-\d+(?:\.\d+)*$")
@@ -75,7 +85,52 @@ def list_devices() -> tuple[list[UsbipdDevice], list[str]]:
     if not result.ok:
         detail = (result.stderr or result.stdout).strip()
         return [], [f"usbipd list failed: {detail or result.returncode}"]
-    return parse_list(result.stdout), []
+    return parse_list(result.stdout), warning_lines(result.stderr)
+
+
+def service_status() -> UsbipdServiceStatus:
+    result = system.powershell(
+        "Get-CimInstance Win32_Service -Filter \"Name='usbipd'\" "
+        "| Select-Object Name,State,StartMode,ExitCode,ServiceSpecificExitCode "
+        "| ConvertTo-Json -Compress",
+        timeout=3.0,
+    )
+    if not result.ok:
+        return UsbipdServiceStatus(
+            installed=False,
+            running=False,
+            state="unknown",
+            detail=(result.stderr or result.stdout).strip() or "unable to query Windows service state",
+        )
+
+    raw = result.stdout.strip()
+    if not raw:
+        return UsbipdServiceStatus(
+            installed=False,
+            running=False,
+            state="missing",
+            detail="Windows service `usbipd` is not installed",
+        )
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return UsbipdServiceStatus(
+            installed=True,
+            running=False,
+            state="unknown",
+            detail=raw,
+        )
+
+    state = str(data.get("State") or "unknown")
+    exit_code = data.get("ExitCode")
+    return UsbipdServiceStatus(
+        installed=True,
+        running=state.lower() == "running",
+        state=state,
+        exit_code=int(exit_code) if isinstance(exit_code, int) else None,
+        detail=f"ExitCode={exit_code}" if exit_code not in {None, 0} else None,
+    )
 
 
 def parse_list(text: str) -> list[UsbipdDevice]:
@@ -121,6 +176,15 @@ def parse_list(text: str) -> list[UsbipdDevice]:
         )
 
     return devices
+
+
+def warning_lines(text: str) -> list[str]:
+    warnings: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("usbipd: warning"):
+            warnings.append(stripped)
+    return warnings
 
 
 def attach(bus_id: str, dry_run: bool = False) -> system.CommandResult:
