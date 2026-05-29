@@ -175,6 +175,53 @@ def test_gamepad_status_json_reports_native_usb_and_bluetooth_routes(monkeypatch
     assert "v2 bridge" in output["gamepads"][2]["action"]
 
 
+def test_waveshare_can_a_send_dry_run_encodes_config_and_extended_frame(capsys):
+    exit_code = main(
+        [
+            "waveshare-can-a",
+            "send",
+            "--port",
+            "/dev/null",
+            "--dry-run",
+            "--json",
+            "--protocol",
+            "variable",
+            "--can-bitrate",
+            "1000000",
+            "--frame-type",
+            "extended",
+            "--id",
+            "0x1234567",
+            "--data",
+            "11 22",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert output["dry_run"] is True
+    assert output["baud"] == 2000000
+    assert output["payload_hex"].endswith("aa e2 67 45 23 01 11 22 55")
+
+
+def test_waveshare_can_a_decode_json(capsys):
+    exit_code = main(
+        [
+            "waveshare-can-a",
+            "decode",
+            "--json",
+            "--hex",
+            "aa c2 03 01 11 22 55",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert output["frames"][0]["id"] == "0x103"
+    assert output["frames"][0]["frame_type"] == "standard"
+    assert output["frames"][0]["data"] == "11 22"
+
+
 def test_scan_json_prints_devices_and_warnings(monkeypatch, capsys):
     monkeypatch.setattr(
         "hurry_porter.cli.scan_devices",

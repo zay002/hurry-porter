@@ -22,6 +22,18 @@ from .serial_io import (
 from .serial_setup import setup_serial
 from .usbipd import attach as usbipd_attach
 from .usbipd import bind_command, bind_elevated
+from .waveshare_can_a import (
+    DEFAULT_USB_BAUD,
+    CanFrame,
+    WaveshareCanError,
+    decode_frames,
+    encode_config,
+    encode_frame,
+    frame_to_json,
+    parse_can_id,
+    read_frames,
+    run_transaction,
+)
 from .windows_setup import setup_usbipd
 
 
@@ -117,6 +129,37 @@ def build_parser() -> argparse.ArgumentParser:
     gamepad_status.add_argument("--json", action="store_true", help="Print machine-readable gamepad status")
     gamepad_status.set_defaults(handler=cmd_gamepad_status)
 
+    waveshare = sub.add_parser("waveshare-can-a", help="Waveshare USB-CAN-A helpers")
+    waveshare_sub = waveshare.add_subparsers(dest="waveshare_command")
+    config_cmd = waveshare_sub.add_parser("configure", help="Configure USB-CAN-A CAN bitrate, protocol, frame type, and mode")
+    add_waveshare_common_args(config_cmd)
+    add_waveshare_config_args(config_cmd)
+    config_cmd.set_defaults(handler=cmd_waveshare_configure)
+
+    send_cmd = waveshare_sub.add_parser("send", help="Send one CAN2.0A/B frame through USB-CAN-A")
+    add_waveshare_common_args(send_cmd)
+    add_waveshare_config_args(send_cmd)
+    send_cmd.add_argument("--id", required=True, help="CAN id, e.g. 0x123 or 0x1234567")
+    send_cmd.add_argument("--data", default="", help='CAN data bytes, e.g. "11 22 33"; max 8 bytes')
+    send_cmd.add_argument("--remote", action="store_true", help="Send a remote frame instead of a data frame")
+    send_cmd.add_argument("--dlc", type=int, help="Remote frame DLC, default: data length or 0")
+    send_cmd.add_argument("--no-configure", action="store_true", help="Do not prepend the USB-CAN-A configuration command")
+    send_cmd.add_argument("--read-timeout", type=float, default=0.2, help="Seconds to wait for returned frames")
+    send_cmd.add_argument("--read-bytes", type=int, default=4096, help="Maximum response bytes to read")
+    send_cmd.set_defaults(handler=cmd_waveshare_send)
+
+    recv_cmd = waveshare_sub.add_parser("recv", help="Read and decode USB-CAN-A frames for a short duration")
+    add_waveshare_common_args(recv_cmd)
+    recv_cmd.add_argument("--duration", type=float, default=2.0, help="Seconds to read, default: 2.0")
+    recv_cmd.add_argument("--read-bytes", type=int, default=4096, help="Maximum bytes per serial read")
+    recv_cmd.set_defaults(handler=cmd_waveshare_recv)
+
+    decode_cmd = waveshare_sub.add_parser("decode", help="Decode raw USB-CAN-A serial bytes")
+    decode_cmd.add_argument("--protocol", choices=["variable", "fixed"], default="variable")
+    decode_cmd.add_argument("--hex", required=True, dest="raw_hex", help="Raw serial bytes to decode")
+    decode_cmd.add_argument("--json", action="store_true", help="Print machine-readable decode output")
+    decode_cmd.set_defaults(handler=cmd_waveshare_decode)
+
     ros = sub.add_parser("ros", help="ROS integration helpers")
     ros_sub = ros.add_subparsers(dest="ros_command")
     export = ros_sub.add_parser("export", help="Export ROS launch/env values from discovered devices")
@@ -127,6 +170,23 @@ def build_parser() -> argparse.ArgumentParser:
     export.set_defaults(handler=cmd_ros_export)
 
     return parser
+
+
+def add_waveshare_common_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--port", help="WSL serial path, e.g. /dev/serial/by-id/... or /dev/ttyUSB0")
+    parser.add_argument("--baud", type=int, default=DEFAULT_USB_BAUD, help="USB serial baud, default: 2000000")
+    parser.add_argument("--protocol", choices=["variable", "fixed"], default="variable")
+    parser.add_argument("--dry-run", action="store_true", help="Print encoded serial bytes without opening the port")
+    parser.add_argument("--json", action="store_true", help="Print machine-readable output")
+
+
+def add_waveshare_config_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--can-bitrate", type=int, default=1000000, help="CAN bitrate, default: 1000000")
+    parser.add_argument("--frame-type", choices=["standard", "extended"], default="standard", help="CAN2.0A standard or CAN2.0B extended")
+    parser.add_argument("--mode", choices=["normal", "silent", "loopback", "silent_loopback"], default="normal")
+    parser.add_argument("--filter-id", default="0x0", help="Acceptance filter id, default: 0")
+    parser.add_argument("--mask-id", default="0x0", help="Acceptance mask id, default: 0")
+    parser.add_argument("--no-auto-retransmit", action="store_true", help="Disable CAN auto retransmit")
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -432,6 +492,174 @@ def gamepad_status_item(device: DeviceDescriptor) -> dict[str, object]:
         "route": "unknown",
         "action": device.recommendation or "run hurry scan --json for details",
     }
+
+
+def cmd_waveshare_configure(args: argparse.Namespace) -> int:
+    port, error = select_waveshare_port(args.port)
+    if error or not port:
+        return print_port_error(error or "missing serial port", args.json)
+    try:
+        payload = encode_config(
+            can_bitrate=args.can_bitrate,
+            frame_type=args.frame_type,
+            protocol=args.protocol,
+            mode=args.mode,
+            filter_id=parse_can_id(args.filter_id),
+            mask_id=parse_can_id(args.mask_id),
+            auto_retransmit=not args.no_auto_retransmit,
+        )
+        result = run_transaction(
+            port=port,
+            payloads=[payload],
+            baud=args.baud,
+            protocol=args.protocol,
+            dry_run=args.dry_run,
+        )
+    except (OSError, WaveshareCanError, SerialIoError) as exc:
+        return print_error(str(exc), args.json, port=port)
+    return print_waveshare_result(result, args.json)
+
+
+def cmd_waveshare_send(args: argparse.Namespace) -> int:
+    port, error = select_waveshare_port(args.port)
+    if error or not port:
+        return print_port_error(error or "missing serial port", args.json)
+    try:
+        frame = CanFrame(
+            can_id=parse_can_id(args.id),
+            data=b"" if args.remote or not args.data else payload_from_hex(args.data),
+            frame_type=args.frame_type,
+            frame_format="remote" if args.remote else "data",
+            dlc=args.dlc,
+        )
+        payloads: list[bytes] = []
+        if not args.no_configure:
+            payloads.append(
+                encode_config(
+                    can_bitrate=args.can_bitrate,
+                    frame_type=args.frame_type,
+                    protocol=args.protocol,
+                    mode=args.mode,
+                    filter_id=parse_can_id(args.filter_id),
+                    mask_id=parse_can_id(args.mask_id),
+                    auto_retransmit=not args.no_auto_retransmit,
+                )
+            )
+        payloads.append(encode_frame(frame, protocol=args.protocol))
+        result = run_transaction(
+            port=port,
+            payloads=payloads,
+            baud=args.baud,
+            read_timeout=args.read_timeout,
+            read_bytes=args.read_bytes,
+            protocol=args.protocol,
+            dry_run=args.dry_run,
+        )
+    except (OSError, WaveshareCanError, SerialIoError) as exc:
+        return print_error(str(exc), args.json, port=port)
+    return print_waveshare_result(result, args.json)
+
+
+def cmd_waveshare_recv(args: argparse.Namespace) -> int:
+    port, error = select_waveshare_port(args.port)
+    if error or not port:
+        return print_port_error(error or "missing serial port", args.json)
+    if args.dry_run:
+        result = {
+            "port": port,
+            "baud": args.baud,
+            "protocol": args.protocol,
+            "duration": args.duration,
+            "dry_run": True,
+        }
+        print(json.dumps(result, indent=2, sort_keys=True) if args.json else result)
+        return 0
+    try:
+        result = read_frames(
+            port=port,
+            baud=args.baud,
+            duration=args.duration,
+            read_bytes=args.read_bytes,
+            protocol=args.protocol,
+        )
+    except (OSError, WaveshareCanError, SerialIoError) as exc:
+        return print_error(str(exc), args.json, port=port)
+    return print_waveshare_result(result, args.json)
+
+
+def cmd_waveshare_decode(args: argparse.Namespace) -> int:
+    try:
+        raw = payload_from_hex(args.raw_hex)
+        frames = decode_frames(raw, args.protocol)
+    except (WaveshareCanError, SerialIoError) as exc:
+        return print_error(str(exc), args.json)
+    payload = {"frames": [frame_to_json(frame) for frame in frames]}
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print_decoded_frames(payload["frames"])
+    return 0
+
+
+def select_waveshare_port(requested: str | None) -> tuple[str | None, str | None]:
+    return select_serial_port(current_serial_candidates(), requested)
+
+
+def print_waveshare_result(result, as_json: bool) -> int:
+    frames = [frame_to_json(frame) for frame in (result.decoded_frames or [])]
+    payload = {
+        "ok": True,
+        "port": result.port,
+        "baud": result.baud,
+        "dry_run": result.dry_run,
+        "written": result.written,
+        "payload_hex": result.payload_hex,
+        "response_hex": result.response_hex,
+        "frames": frames,
+    }
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+    status = "dry-run" if result.dry_run else "ok"
+    print(f"{status} {result.port} baud={result.baud} bytes={result.written}")
+    if result.payload_hex:
+        print(f"tx: {result.payload_hex}")
+    if result.response_hex:
+        print(f"rx: {result.response_hex}")
+    print_decoded_frames(frames)
+    return 0
+
+
+def print_decoded_frames(frames: list[dict[str, object]]) -> None:
+    for frame in frames:
+        checksum = ""
+        if frame.get("checksum_ok") is not None:
+            checksum = f" checksum_ok={frame['checksum_ok']}"
+        print(
+            f"frame {frame['frame_type']} {frame['frame_format']} "
+            f"id={frame['id']} dlc={frame['dlc']} data={frame['data']}{checksum}"
+        )
+
+
+def print_port_error(error: str, as_json: bool) -> int:
+    candidates = current_serial_candidates()
+    payload = {"ok": False, "error": error, "serial_candidates": to_jsonable(candidates)}
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(error, file=sys.stderr)
+        for device in candidates:
+            print(f"candidate: {device.stable_path}  {device.name}", file=sys.stderr)
+    return 1
+
+
+def print_error(error: str, as_json: bool, **extra: object) -> int:
+    payload = {"ok": False, "error": error, **extra}
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(error, file=sys.stderr)
+    return 1
 
 
 def cmd_ros_export(args: argparse.Namespace) -> int:

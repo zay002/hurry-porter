@@ -26,6 +26,7 @@
 - `hurry ros export`：导出 ROS 2 launch/env/params/launch-file 可消费的串口、手柄、LAN 参数。
 - `hurry serial send`：向 WSL 串口写入一帧 text/hex 协议，并可短暂读取回应。
 - `hurry gamepad status`：区分 WSL 原生手柄、可 attach 的 USB 手柄和待 v2 桥接的 Windows 蓝牙/HID 手柄。
+- `hurry waveshare-can-a`：针对微雪 USB-CAN-A 的 CAN2.0A/B 配置、发送和接收解码。
 - `hurry_porter_cpp`：ROS 2 C++ 扩展点，用于后续 GameInput / Hyper-V sockets / Windows-only 输入桥接。
 
 ## 快速开始
@@ -85,7 +86,41 @@ hurry serial send --port /dev/ttyUSB0 --baud 115200 --text "AT" --newline
 
 如果只有一个 WSL 串口，`--port` 可以省略；如果有多个串口，请显式传入稳定路径 `/dev/serial/by-id/...`。
 
-### 4. 构建 ROS 2 workspace
+### 4. 使用微雪 USB-CAN-A
+
+USB-CAN-A 是 USB-串口-CAN 设备，不会在 Linux 里变成 `can0`。默认 USB 串口波特率是 `2000000`，v1 为它提供专用 CAN2.0A/B 封装：
+
+```bash
+hurry waveshare-can-a configure \
+  --port /dev/ttyUSB0 \
+  --can-bitrate 1000000 \
+  --frame-type standard \
+  --mode normal \
+  --dry-run
+
+hurry waveshare-can-a send \
+  --port /dev/ttyUSB0 \
+  --can-bitrate 1000000 \
+  --frame-type standard \
+  --id 0x123 \
+  --data "11 22 33 44" \
+  --dry-run
+
+hurry waveshare-can-a send \
+  --port /dev/ttyUSB0 \
+  --protocol variable \
+  --frame-type extended \
+  --id 0x1234567 \
+  --data "11 22 33 44 55 66 77 88"
+```
+
+`frame-type standard` 对应 CAN2.0A 11 位 ID，`frame-type extended` 对应 CAN2.0B 29 位 ID。接收一小段数据并解码：
+
+```bash
+hurry waveshare-can-a recv --port /dev/ttyUSB0 --duration 2.0
+```
+
+### 5. 构建 ROS 2 workspace
 
 在 WSL2 中：
 
@@ -95,7 +130,7 @@ colcon build
 source install/setup.bash
 ```
 
-### 5. 诊断和扫描
+### 6. 诊断和扫描
 
 ```bash
 hurry doctor
@@ -103,7 +138,7 @@ hurry scan --json
 hurry gamepad status --json
 ```
 
-### 6. 配置设备角色
+### 7. 配置设备角色
 
 生成示例配置：
 
@@ -145,13 +180,14 @@ lan_ports = [502, 30002]
 preferred_transport = "lan"
 ```
 
-### 7. Attach 和导出 ROS 参数
+### 8. Attach 和导出 ROS 参数
 
 ```bash
 hurry attach base_controller --dry-run
 hurry attach base_controller
 hurry watch --once --dry-run
 hurry serial send --port /dev/ttyUSB0 --baud 115200 --hex "01 03 00 00" --dry-run
+hurry waveshare-can-a send --port /dev/ttyUSB0 --id 0x123 --data "11 22" --dry-run
 hurry ros export
 hurry ros export --format json
 hurry ros export --format launch
@@ -223,6 +259,13 @@ hurry serial send --port /dev/serial/by-id/<your-device> --baud 115200 --hex "01
 
 如果 `hurry scan --json` 只能看到 `windows_com_pending`，说明 Windows 侧看到了 COM 口，但 usbipd 当前没有可 attach 的 bus id；重插 USB-CAN 或重启 usbipd 服务后再扫描。
 
+对微雪 USB-CAN-A，优先使用专用命令，不需要自己拼底层串口帧：
+
+```bash
+hurry waveshare-can-a send --port /dev/ttyUSB0 --frame-type standard --id 0x123 --data "11 22"
+hurry waveshare-can-a send --port /dev/ttyUSB0 --frame-type extended --id 0x1234567 --data "11 22"
+```
+
 ## 设计原则
 
 - **复用成熟工具**：USB 主通道使用 `usbipd-win`，不重复造 USB/IP。
@@ -292,6 +335,7 @@ Many robotics developers run ROS 2 inside WSL2 on a Windows laptop while control
 - `hurry ros export`: exports serial, gamepad, and LAN values for ROS 2 launch/env/params/launch-file usage.
 - `hurry serial send`: writes one text/hex protocol frame to a WSL serial port and can briefly read a response.
 - `hurry gamepad status`: separates WSL-native gamepads, attachable USB gamepads, and Windows Bluetooth/HID gamepads planned for the v2 bridge.
+- `hurry waveshare-can-a`: configures, sends, and decodes CAN2.0A/B frames for Waveshare USB-CAN-A.
 - `hurry_porter_cpp`: ROS 2 C++ extension point for future GameInput / Hyper-V sockets / Windows-only input bridges.
 
 ## Quick Start
@@ -345,6 +389,17 @@ hurry serial send --port /dev/ttyUSB0 --baud 115200 --text "AT" --newline
 
 If only one WSL serial device is visible, `--port` may be omitted. Pass `/dev/serial/by-id/...` when several serial devices are present.
 
+Use Waveshare USB-CAN-A:
+
+```bash
+hurry waveshare-can-a configure --port /dev/ttyUSB0 --can-bitrate 1000000 --frame-type standard --dry-run
+hurry waveshare-can-a send --port /dev/ttyUSB0 --frame-type standard --id 0x123 --data "11 22" --dry-run
+hurry waveshare-can-a send --port /dev/ttyUSB0 --frame-type extended --id 0x1234567 --data "11 22"
+hurry waveshare-can-a recv --port /dev/ttyUSB0 --duration 2.0
+```
+
+`standard` maps to CAN2.0A 11-bit IDs and `extended` maps to CAN2.0B 29-bit IDs. The USB serial baud defaults to `2000000`.
+
 Build in WSL2:
 
 ```bash
@@ -375,6 +430,7 @@ hurry attach base_controller --dry-run
 hurry attach base_controller
 hurry watch --once --dry-run
 hurry serial send --port /dev/ttyUSB0 --baud 115200 --hex "01 03 00 00" --dry-run
+hurry waveshare-can-a send --port /dev/ttyUSB0 --id 0x123 --data "11 22" --dry-run
 hurry ros export
 hurry ros export --format json
 hurry ros export --format launch
@@ -433,6 +489,13 @@ hurry serial send --port /dev/serial/by-id/<your-device> --baud 115200 --hex "01
 ```
 
 If `hurry scan --json` only shows `windows_com_pending`, Windows sees the COM port but usbipd currently has no attachable bus id. Replug the adapter or restart the usbipd service, then scan again.
+
+For Waveshare USB-CAN-A, prefer the dedicated helper:
+
+```bash
+hurry waveshare-can-a send --port /dev/ttyUSB0 --frame-type standard --id 0x123 --data "11 22"
+hurry waveshare-can-a send --port /dev/ttyUSB0 --frame-type extended --id 0x1234567 --data "11 22"
+```
 
 ## Development
 
