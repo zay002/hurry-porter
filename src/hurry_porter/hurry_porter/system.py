@@ -59,6 +59,17 @@ def find_windows_command(name: str) -> str | None:
     return path or None
 
 
+def windows_path_to_wsl(path: str | None) -> str | None:
+    if not path:
+        return None
+    cleaned = path.strip().strip('"')
+    if len(cleaned) >= 3 and cleaned[1:3] == ":\\":
+        drive = cleaned[0].lower()
+        rest = cleaned[3:].replace("\\", "/")
+        return f"/mnt/{drive}/{rest}"
+    return cleaned
+
+
 def is_wsl2() -> bool:
     release = platform.release().lower()
     return "microsoft" in release and "wsl2" in release
@@ -87,4 +98,3 @@ def read_text(path: Path) -> str | None:
         return path.read_text(encoding="utf-8", errors="replace").strip()
     except OSError:
         return None
-
