@@ -49,3 +49,5 @@ jobs:
           hurry scan --json
           hurry watch --once --json --no-attach
           hurry ros export --format json
+          hurry ros export --format params
+          hurry ros export --format launch-file

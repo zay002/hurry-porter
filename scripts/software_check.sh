@@ -21,5 +21,7 @@ hurry setup usbipd --json >/dev/null || true
 hurry scan --json >/dev/null
 hurry watch --once --json --no-attach >/dev/null
 hurry ros export --format json >/dev/null
+hurry ros export --format params >/dev/null
+hurry ros export --format launch-file >/dev/null
 
 echo "software checks passed"

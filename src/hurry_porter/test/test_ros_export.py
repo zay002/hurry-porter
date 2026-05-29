@@ -64,8 +64,60 @@ def test_render_exports_json_and_launch_formats_are_machine_readable():
     assert launch_output == "base_busid:=1-4"
 
 
+def test_render_params_file_uses_ros2_wildcard_schema():
+    devices = [
+        DeviceDescriptor(
+            id="serial:/dev/ttyUSB0",
+            kind="serial",
+            locality="wsl_native",
+            state="present",
+            name="USB serial",
+            role="base_controller",
+            stable_path="/dev/ttyUSB0",
+        ),
+        DeviceDescriptor(
+            id="lan:192.168.1.10:arm",
+            kind="lan_robot",
+            locality="lan",
+            state="online",
+            name="arm",
+            role="arm_controller",
+            address="192.168.1.10",
+            metadata={"open_ports": "502,30002"},
+        ),
+    ]
+
+    output = render_exports(devices, "params")
+
+    assert output.startswith("/**:\n  ros__parameters:\n")
+    assert '    base_controller_port: "/dev/ttyUSB0"' in output
+    assert '    arm_controller_host: "192.168.1.10"' in output
+    assert "    arm_controller_ports:\n      - 502\n      - 30002" in output
+
+
+def test_render_launch_file_declares_args_and_env_vars():
+    devices = [
+        DeviceDescriptor(
+            id="input:js0",
+            kind="gamepad",
+            locality="wsl_native",
+            state="present",
+            name="Xbox Controller",
+            role="driver gamepad",
+            stable_path="/dev/input/js0",
+        )
+    ]
+
+    output = render_exports(devices, "launch-file")
+
+    assert "from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable" in output
+    assert "from launch.substitutions import LaunchConfiguration" in output
+    assert 'DeclareLaunchArgument(\n            "driver_gamepad_dev",' in output
+    assert 'name="HURRY_DRIVER_GAMEPAD_DEV"' in output
+    assert 'value=LaunchConfiguration("driver_gamepad_dev")' in output
+
+
 def test_shell_quote_and_sanitize_role_handle_spaces():
     assert sanitize_role("Driver Gamepad!") == "driver_gamepad"
     assert shell_quote("/dev/serial/by-id/usb-CH340") == "/dev/serial/by-id/usb-CH340"
     assert shell_quote("/dev/serial/by-id/usb CH340") == "'/dev/serial/by-id/usb CH340'"
-

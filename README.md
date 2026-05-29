@@ -23,7 +23,7 @@
 - `hurry scan --json`：发现 Windows USB、WSL native serial/input、配置的局域网设备。
 - `hurry attach`：通过 `usbipd-win` 将 Windows USB 设备 attach 到当前 WSL2；需要管理员 bind 时给出明确 PowerShell 命令，默认不自动提权。
 - `hurry watch`：周期扫描设备，并可对 `hurry.toml` 中标记的设备自动 attach。
-- `hurry ros export`：导出 ROS 2 launch/env 可消费的串口、手柄、LAN 参数。
+- `hurry ros export`：导出 ROS 2 launch/env/params/launch-file 可消费的串口、手柄、LAN 参数。
 - `hurry_porter_cpp`：ROS 2 C++ 扩展点，用于后续 GameInput / Hyper-V sockets / Windows-only 输入桥接。
 
 ## 快速开始
@@ -113,7 +113,23 @@ hurry watch --once --dry-run
 hurry ros export
 hurry ros export --format json
 hurry ros export --format launch
+hurry ros export --format params --output config/hurry.generated.yaml
+hurry ros export --format launch-file --output launch/hurry.generated.launch.py
 ```
+
+`params` 会生成 ROS 2 wildcard 参数文件：
+
+```yaml
+/**:
+  ros__parameters:
+    base_controller_port: "/dev/ttyUSB0"
+    arm_controller_host: "192.168.1.10"
+    arm_controller_ports:
+      - 502
+      - 30002
+```
+
+`launch-file` 会生成一个可被 `IncludeLaunchDescription` 引入的 Python launch 文件，同时声明 launch arguments 并设置对应的 `HURRY_*` 环境变量。
 
 ## 手动硬件测试清单
 
@@ -191,7 +207,7 @@ Many robotics developers run ROS 2 inside WSL2 on a Windows laptop while control
 - `hurry scan --json`: discovers Windows USB devices, WSL native serial/input devices, and configured LAN devices.
 - `hurry attach`: attaches Windows USB devices into WSL2 through `usbipd-win`; elevated bind commands are shown explicitly and are not run by default.
 - `hurry watch`: periodically scans devices and can auto-attach devices marked in `hurry.toml`.
-- `hurry ros export`: exports serial, gamepad, and LAN values for ROS 2 launch/env usage.
+- `hurry ros export`: exports serial, gamepad, and LAN values for ROS 2 launch/env/params/launch-file usage.
 - `hurry_porter_cpp`: ROS 2 C++ extension point for future GameInput / Hyper-V sockets / Windows-only input bridges.
 
 ## Quick Start
@@ -242,7 +258,11 @@ hurry watch --once --dry-run
 hurry ros export
 hurry ros export --format json
 hurry ros export --format launch
+hurry ros export --format params --output config/hurry.generated.yaml
+hurry ros export --format launch-file --output launch/hurry.generated.launch.py
 ```
+
+`params` writes a ROS 2 wildcard parameter file. `launch-file` writes an includable Python launch file that declares launch arguments and sets matching `HURRY_*` environment variables.
 
 ## Manual Hardware Test Checklist
 

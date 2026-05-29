@@ -118,6 +118,33 @@ def test_ros_export_json_uses_discovered_devices(monkeypatch, capsys):
     assert output["exports"]["HURRY_BASE_CONTROLLER_PORT"] == "/dev/ttyUSB0"
 
 
+def test_ros_export_writes_params_file(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        "hurry_porter.cli.scan_devices",
+        lambda config: ScanResult(
+            devices=[
+                DeviceDescriptor(
+                    id="serial:/dev/ttyUSB0",
+                    kind="serial",
+                    locality="wsl_native",
+                    state="present",
+                    name="USB serial",
+                    role="base_controller",
+                    stable_path="/dev/ttyUSB0",
+                )
+            ],
+            warnings=[],
+        ),
+    )
+    target = tmp_path / "config" / "hurry.generated.yaml"
+
+    exit_code = main(["ros", "export", "--format", "params", "--output", str(target)])
+
+    assert exit_code == 0
+    assert "wrote" in capsys.readouterr().out
+    assert 'base_controller_port: "/dev/ttyUSB0"' in target.read_text(encoding="utf-8")
+
+
 def test_init_prints_default_config(capsys):
     exit_code = main(["init", "--print"])
     output = capsys.readouterr().out

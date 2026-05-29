@@ -87,7 +87,9 @@ def build_parser() -> argparse.ArgumentParser:
     ros_sub = ros.add_subparsers(dest="ros_command")
     export = ros_sub.add_parser("export", help="Export ROS launch/env values from discovered devices")
     export.add_argument("--config", help="Path to hurry.toml")
-    export.add_argument("--format", choices=["env", "json", "yaml", "launch"], default="env")
+    export.add_argument("--format", choices=["env", "json", "yaml", "launch", "params", "launch-file"], default="env")
+    export.add_argument("--output", help="Write rendered content to a file instead of stdout")
+    export.add_argument("--force", action="store_true", help="Overwrite --output if it already exists")
     export.set_defaults(handler=cmd_ros_export)
 
     return parser
@@ -255,7 +257,19 @@ def cmd_setup_usbipd(args: argparse.Namespace) -> int:
 def cmd_ros_export(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     result = scan_devices(config)
-    print(render_exports(result.devices, args.format))
+    content = render_exports(result.devices, args.format)
+    if not args.output:
+        print(content, end="" if content.endswith("\n") else "\n")
+        return 0
+
+    target = Path(args.output).expanduser()
+    if target.exists() and not args.force:
+        print(f"target output already exists: {target}", file=sys.stderr)
+        print("Use --force to overwrite it, or pass a different output path.", file=sys.stderr)
+        return 1
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    print(f"wrote {target}")
     return 0
 
 
