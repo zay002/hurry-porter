@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from hurry_porter.usbipd import format_bind_command, parse_list
 from hurry_porter.devices import scan_windows_usb
 from hurry_porter.usbipd import UsbipdDevice
@@ -22,6 +24,18 @@ GUID                                  DEVICE
     assert devices[0].pid == "7523"
     assert devices[0].state == "Not shared"
     assert devices[1].name == "Xbox 360 Controller"
+
+
+def test_parse_usbipd_list_mixed_fixture():
+    fixture = Path(__file__).parent / "fixtures" / "usbipd_list_mixed.txt"
+
+    devices = parse_list(fixture.read_text(encoding="utf-8"))
+
+    assert [device.bus_id for device in devices] == ["2-4", "3-2", "4-1"]
+    assert devices[0].name.startswith("G703 LIGHTSPEED")
+    assert devices[0].state == "Not shared"
+    assert devices[1].state == "Shared"
+    assert devices[2].state == "Attached"
 
 
 def test_format_bind_command_uses_full_windows_path():

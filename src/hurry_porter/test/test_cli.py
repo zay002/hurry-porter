@@ -65,3 +65,54 @@ def test_attach_missing_device_is_actionable(monkeypatch, capsys):
     assert output["error"] == "no matching usbipd devices found"
     assert "hurry scan" in output["hint"]
 
+
+def test_scan_json_prints_devices_and_warnings(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "hurry_porter.cli.scan_devices",
+        lambda config, lan_cidr=None, lan_ports=None: ScanResult(
+            devices=[
+                DeviceDescriptor(
+                    id="usbipd:3-2",
+                    kind="serial",
+                    locality="windows_host",
+                    state="Shared",
+                    name="USB-SERIAL CH340",
+                    bus_id="3-2",
+                )
+            ],
+            warnings=["sample warning"],
+        ),
+    )
+
+    exit_code = main(["scan", "--json"])
+    output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert output["devices"][0]["id"] == "usbipd:3-2"
+    assert output["warnings"] == ["sample warning"]
+
+
+def test_ros_export_json_uses_discovered_devices(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "hurry_porter.cli.scan_devices",
+        lambda config: ScanResult(
+            devices=[
+                DeviceDescriptor(
+                    id="serial:/dev/ttyUSB0",
+                    kind="serial",
+                    locality="wsl_native",
+                    state="present",
+                    name="USB serial",
+                    role="base_controller",
+                    stable_path="/dev/ttyUSB0",
+                )
+            ],
+            warnings=[],
+        ),
+    )
+
+    exit_code = main(["ros", "export", "--format", "json"])
+    output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert output["exports"]["HURRY_BASE_CONTROLLER_PORT"] == "/dev/ttyUSB0"

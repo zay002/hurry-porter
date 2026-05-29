@@ -1,0 +1,10 @@
+Connected:
+BUSID  VID:PID    DEVICE                                                        STATE
+2-4    046d:c539  G703 LIGHTSPEED, USB 输入设备, LIGHTSPEED Receiver            Not shared
+3-2    1a86:7523  USB-SERIAL CH340                                             Shared
+4-1    045e:028e  Xbox 360 Controller                                          Attached
+
+Persisted:
+GUID                                  DEVICE
+{d5ab1234-0000-0000-0000-123456789abc}  USB-SERIAL CH340
+
