@@ -1,6 +1,13 @@
 from hurry_porter.config import DeviceRule, HurryConfig, apply_roles
-from hurry_porter.devices import parse_windows_gamepads, scan_configured_lan, scan_lan_cidr, scan_windows_gamepads
+from hurry_porter.devices import (
+    parse_windows_gamepads,
+    scan_configured_lan,
+    scan_lan_cidr,
+    scan_windows_gamepads,
+    scan_windows_serial_ports,
+)
 from hurry_porter.lan import ProbeResult
+from hurry_porter.serial_setup import WindowsComPort
 from hurry_porter.system import CommandResult
 from hurry_porter.models import DeviceDescriptor
 
@@ -125,3 +132,28 @@ def test_scan_windows_gamepads_uses_powershell(monkeypatch):
 
     assert warnings == []
     assert devices[0].name == "Pro Controller"
+
+
+def test_scan_windows_serial_ports_reports_missing_bus_id(monkeypatch):
+    monkeypatch.setattr(
+        "hurry_porter.devices.scan_windows_com_ports",
+        lambda: [
+            WindowsComPort(
+                name="USB-SERIAL CH340 (COM5)",
+                device_id=r"USB\VID_1A86&PID_7523\6&3AD82D6F&0&3",
+                manufacturer="wch.cn",
+                status="present",
+                bus_id=None,
+            )
+        ],
+    )
+
+    devices = scan_windows_serial_ports([])
+
+    assert devices[0].kind == "serial"
+    assert devices[0].vid == "1a86"
+    assert devices[0].pid == "7523"
+    assert devices[0].bus_id is None
+    assert devices[0].transports[0].kind == "windows_com_pending"
+    assert "no attachable bus id" in devices[0].transports[0].warnings[0]
+

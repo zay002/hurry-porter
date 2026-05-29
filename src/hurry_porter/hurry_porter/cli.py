@@ -11,6 +11,14 @@ from .devices import scan_devices
 from .doctor import collect_doctor_report
 from .models import DeviceDescriptor, to_jsonable
 from .ros_export import render_exports
+from .serial_io import (
+    SerialIoError,
+    current_serial_candidates,
+    payload_from_hex,
+    payload_from_text,
+    select_serial_port,
+    send_serial,
+)
 from .serial_setup import setup_serial
 from .usbipd import attach as usbipd_attach
 from .usbipd import bind_command, bind_elevated
@@ -51,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--json", action="store_true", help="Print machine-readable diagnostics")
     doctor.set_defaults(handler=cmd_doctor)
 
-    scan = sub.add_parser("scan", help="Discover Windows USB, WSL serial/input, and configured LAN devices")
+    scan = sub.add_parser("scan", help="Discover Windows USB/COM, WSL serial/input, and configured LAN devices")
     scan.add_argument("--config", help="Path to hurry.toml")
     scan.add_argument("--json", action="store_true", help="Print machine-readable scan output")
     scan.add_argument("--lan-cidr", help="Optional CIDR to actively probe, e.g. 192.168.1.0/24")
@@ -86,6 +94,21 @@ def build_parser() -> argparse.ArgumentParser:
     setup_serial_parser = setup_sub.add_parser("serial", help="Check common USB serial drivers and setup guidance")
     setup_serial_parser.add_argument("--json", action="store_true", help="Print machine-readable serial setup output")
     setup_serial_parser.set_defaults(handler=cmd_setup_serial)
+
+    serial = sub.add_parser("serial", help="Small serial protocol helpers")
+    serial_sub = serial.add_subparsers(dest="serial_command")
+    serial_send = serial_sub.add_parser("send", help="Write one text or hex protocol frame to a WSL serial port")
+    serial_send.add_argument("--port", help="WSL serial path, e.g. /dev/serial/by-id/... or /dev/ttyUSB0")
+    serial_send.add_argument("--baud", type=int, default=115200, help="Serial baud rate, default: 115200")
+    serial_payload = serial_send.add_mutually_exclusive_group(required=True)
+    serial_payload.add_argument("--hex", dest="hex_payload", help='Hex bytes, e.g. "01 03 00 00"')
+    serial_payload.add_argument("--text", dest="text_payload", help="UTF-8 text payload")
+    serial_send.add_argument("--newline", action="store_true", help="Append LF to --text payload")
+    serial_send.add_argument("--read-timeout", type=float, default=0.2, help="Seconds to wait for a response, default: 0.2")
+    serial_send.add_argument("--read-bytes", type=int, default=4096, help="Maximum response bytes to read")
+    serial_send.add_argument("--dry-run", action="store_true", help="Print payload without opening the serial port")
+    serial_send.add_argument("--json", action="store_true", help="Print machine-readable send result")
+    serial_send.set_defaults(handler=cmd_serial_send)
 
     ros = sub.add_parser("ros", help="ROS integration helpers")
     ros_sub = ros.add_subparsers(dest="ros_command")
@@ -292,6 +315,55 @@ def cmd_setup_serial(args: argparse.Namespace) -> int:
     print("\nHints")
     for hint in report.hints:
         print(f"- {hint}")
+    return 0
+
+
+def cmd_serial_send(args: argparse.Namespace) -> int:
+    candidates = current_serial_candidates()
+    port, error = select_serial_port(candidates, args.port)
+    if error or not port:
+        payload = {
+            "ok": False,
+            "error": error or "missing serial port",
+            "serial_candidates": to_jsonable(candidates),
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(payload["error"], file=sys.stderr)
+            for device in candidates:
+                print(f"candidate: {device.stable_path}  {device.name}", file=sys.stderr)
+        return 1
+
+    try:
+        frame = payload_from_hex(args.hex_payload) if args.hex_payload is not None else payload_from_text(args.text_payload, args.newline)
+        result = send_serial(
+            port=port,
+            payload=frame,
+            baud=args.baud,
+            read_timeout=args.read_timeout,
+            read_bytes=args.read_bytes,
+            dry_run=args.dry_run,
+        )
+    except (OSError, SerialIoError) as exc:
+        if args.json:
+            print(json.dumps({"ok": False, "error": str(exc), "port": port}, indent=2, sort_keys=True))
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
+
+    if args.json:
+        payload = to_jsonable(result)
+        payload["ok"] = True
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        status = "dry-run" if result.dry_run else "ok"
+        print(f"{status} {result.port} baud={result.baud} bytes={result.written}")
+        print(f"tx: {result.payload_hex}")
+        if result.response_hex:
+            print(f"rx: {result.response_hex}")
+            if result.response_text.strip():
+                print(f"text: {result.response_text.rstrip()}")
     return 0
 
 

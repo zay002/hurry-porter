@@ -95,6 +95,31 @@ def test_attach_missing_device_is_actionable(monkeypatch, capsys):
     assert "hurry scan" in output["hint"]
 
 
+def test_serial_send_json_dry_run_uses_single_serial_candidate(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "hurry_porter.cli.current_serial_candidates",
+        lambda: [
+            DeviceDescriptor(
+                id="serial:/dev/serial/by-id/usb-can",
+                kind="serial",
+                locality="wsl_native",
+                state="present",
+                name="USB-CAN",
+                stable_path="/dev/serial/by-id/usb-can",
+            )
+        ],
+    )
+
+    exit_code = main(["serial", "send", "--hex", "01 02 0A", "--dry-run", "--json"])
+    output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert output["ok"] is True
+    assert output["dry_run"] is True
+    assert output["port"] == "/dev/serial/by-id/usb-can"
+    assert output["payload_hex"] == "01 02 0a"
+
+
 def test_scan_json_prints_devices_and_warnings(monkeypatch, capsys):
     monkeypatch.setattr(
         "hurry_porter.cli.scan_devices",

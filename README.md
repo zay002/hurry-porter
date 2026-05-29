@@ -20,10 +20,11 @@
 
 - `hurry doctor`：检查 WSL2、mirrored networking、ROS 环境、Python ABI、`usbipd-win`、`winget`、`lsusb`、`udevadm`、串口和手柄设备。
 - `hurry init`：生成 `hurry.toml`，也可以根据当前扫描结果生成候选设备规则。
-- `hurry scan --json`：发现 Windows USB、Windows 蓝牙/HID 手柄、WSL native serial/input、配置的局域网设备。
+- `hurry scan --json`：发现 Windows USB、Windows COM/USB 串口、Windows 蓝牙/HID 手柄、WSL native serial/input、配置的局域网设备。
 - `hurry attach`：通过 `usbipd-win` 将 Windows USB 设备 attach 到当前 WSL2；需要管理员 bind 时给出明确 PowerShell 命令，默认不自动提权。
 - `hurry watch`：周期扫描设备，并可对 `hurry.toml` 中标记的设备自动 attach。
 - `hurry ros export`：导出 ROS 2 launch/env/params/launch-file 可消费的串口、手柄、LAN 参数。
+- `hurry serial send`：向 WSL 串口写入一帧 text/hex 协议，并可短暂读取回应。
 - `hurry_porter_cpp`：ROS 2 C++ 扩展点，用于后续 GameInput / Hyper-V sockets / Windows-only 输入桥接。
 
 ## 快速开始
@@ -66,7 +67,24 @@ hurry setup serial --json
 
 只从芯片厂商或设备厂商安装 Windows 驱动。WSL 侧通常不需要下载驱动，只要内核模块存在即可。
 
-### 3. 构建 ROS 2 workspace
+### 3. 发送串口协议帧
+
+USB-CAN、USB-RS485 或控制板如果在 WSL 中表现为 `/dev/ttyUSB*` 或 `/dev/serial/by-id/*`，v1 只把它当作串口设备处理。你可以先 dry-run 一帧十六进制协议：
+
+```bash
+hurry serial send --port /dev/ttyUSB0 --baud 115200 --hex "01 03 00 00" --dry-run
+```
+
+确认端口、波特率和协议帧后再去掉 `--dry-run`：
+
+```bash
+hurry serial send --port /dev/ttyUSB0 --baud 115200 --hex "01 03 00 00"
+hurry serial send --port /dev/ttyUSB0 --baud 115200 --text "AT" --newline
+```
+
+如果只有一个 WSL 串口，`--port` 可以省略；如果有多个串口，请显式传入稳定路径 `/dev/serial/by-id/...`。
+
+### 4. 构建 ROS 2 workspace
 
 在 WSL2 中：
 
@@ -76,14 +94,14 @@ colcon build
 source install/setup.bash
 ```
 
-### 4. 诊断和扫描
+### 5. 诊断和扫描
 
 ```bash
 hurry doctor
 hurry scan --json
 ```
 
-### 5. 配置设备角色
+### 6. 配置设备角色
 
 生成示例配置：
 
@@ -125,12 +143,13 @@ lan_ports = [502, 30002]
 preferred_transport = "lan"
 ```
 
-### 6. Attach 和导出 ROS 参数
+### 7. Attach 和导出 ROS 参数
 
 ```bash
 hurry attach base_controller --dry-run
 hurry attach base_controller
 hurry watch --once --dry-run
+hurry serial send --port /dev/ttyUSB0 --baud 115200 --hex "01 03 00 00" --dry-run
 hurry ros export
 hurry ros export --format json
 hurry ros export --format launch
@@ -161,7 +180,8 @@ hurry ros export --format launch-file --output launch/hurry.generated.launch.py
 3. 插入 USB 串口控制板或 USB 手柄，运行 `hurry scan --json`。
 4. 如果设备显示 `Not shared`，先按 `hurry attach <role|busid> --dry-run` 输出的 bind 命令在 Windows 管理员权限下 bind。
 5. 运行 `hurry attach <role|busid>`，确认 WSL2 中出现 `/dev/ttyUSB*`、`/dev/ttyACM*` 或 `/dev/input/js*`。
-6. 运行 `hurry ros export --format launch`，确认输出可以放进 ROS 2 launch 参数。
+6. 对 USB-CAN 或控制板串口，先运行 `hurry serial send --dry-run`，确认协议帧后再实际发送。
+7. 运行 `hurry ros export --format launch`，确认输出可以放进 ROS 2 launch 参数。
 
 ## 故障排查
 
@@ -184,6 +204,16 @@ hurry attach <busid>
 
 蓝牙手柄在 v1 中不会通过 attach 蓝牙适配器解决；优先测试 USB 有线手柄或 USB 串口/CAN 设备。Windows-only 蓝牙/XInput/GameInput 桥接属于后续 C++ agent 路线。
 如果 `hurry scan --json` 能看到 `windows_input_bridge`，表示手柄已经在 Windows 侧连接成功，但还没有 WSL native `/dev/input/js*` 路径。
+
+### USB-CAN 已经是串口设备
+
+很多 USB-CAN 适配器有自己的转换芯片和上位机协议。只要 WSL 中已经看到 `/dev/ttyUSB0` 或 `/dev/serial/by-id/...`，v1 就直接发送厂商协议帧：
+
+```bash
+hurry serial send --port /dev/serial/by-id/<your-device> --baud 115200 --hex "01 03 00 00"
+```
+
+如果 `hurry scan --json` 只能看到 `windows_com_pending`，说明 Windows 侧看到了 COM 口，但 usbipd 当前没有可 attach 的 bus id；重插 USB-CAN 或重启 usbipd 服务后再扫描。
 
 ## 设计原则
 
@@ -220,6 +250,7 @@ ros2 run hurry_porter_cpp hurry_latency_probe --ros-args -p transport:=placehold
 - 更完整的 `usbipd-win` 输出兼容和错误恢复。
 - 自动生成 ROS 2 launch include / parameters 文件。
 - udev 稳定命名辅助。
+- 小型串口协议发送/回应测试用例。
 - Windows-only 手柄桥接：GameInput / XInput -> Hyper-V sockets / AF_VSOCK -> ROS `/joy`。
 - 设备热插拔恢复和机器人 profile。
 
@@ -247,10 +278,11 @@ Many robotics developers run ROS 2 inside WSL2 on a Windows laptop while control
 
 - `hurry doctor`: checks WSL2, mirrored networking, ROS, Python ABI, `usbipd-win`, `winget`, `lsusb`, `udevadm`, serial devices, and gamepads.
 - `hurry init`: creates `hurry.toml`, optionally using the current scan to generate candidate device rules.
-- `hurry scan --json`: discovers Windows USB devices, Windows Bluetooth/HID gamepads, WSL native serial/input devices, and configured LAN devices.
+- `hurry scan --json`: discovers Windows USB devices, Windows COM/USB serial ports, Windows Bluetooth/HID gamepads, WSL native serial/input devices, and configured LAN devices.
 - `hurry attach`: attaches Windows USB devices into WSL2 through `usbipd-win`; elevated bind commands are shown explicitly and are not run by default.
 - `hurry watch`: periodically scans devices and can auto-attach devices marked in `hurry.toml`.
 - `hurry ros export`: exports serial, gamepad, and LAN values for ROS 2 launch/env/params/launch-file usage.
+- `hurry serial send`: writes one text/hex protocol frame to a WSL serial port and can briefly read a response.
 - `hurry_porter_cpp`: ROS 2 C++ extension point for future GameInput / Hyper-V sockets / Windows-only input bridges.
 
 ## Quick Start
@@ -289,6 +321,21 @@ Many robot controllers, USB-CAN adapters, USB-RS485 adapters, and Arduino/ESP32 
 
 Install Windows drivers only from the chip vendor or the device vendor. On WSL, no vendor download is usually needed when the kernel module exists.
 
+Send a serial protocol frame:
+
+```bash
+hurry serial send --port /dev/ttyUSB0 --baud 115200 --hex "01 03 00 00" --dry-run
+```
+
+When the port, baud rate, and frame are confirmed:
+
+```bash
+hurry serial send --port /dev/ttyUSB0 --baud 115200 --hex "01 03 00 00"
+hurry serial send --port /dev/ttyUSB0 --baud 115200 --text "AT" --newline
+```
+
+If only one WSL serial device is visible, `--port` may be omitted. Pass `/dev/serial/by-id/...` when several serial devices are present.
+
 Build in WSL2:
 
 ```bash
@@ -317,6 +364,7 @@ Attach and export:
 hurry attach base_controller --dry-run
 hurry attach base_controller
 hurry watch --once --dry-run
+hurry serial send --port /dev/ttyUSB0 --baud 115200 --hex "01 03 00 00" --dry-run
 hurry ros export
 hurry ros export --format json
 hurry ros export --format launch
@@ -335,7 +383,8 @@ These steps need a real Windows/WSL2 machine and hardware:
 3. Plug in a USB serial controller or USB gamepad, then run `hurry scan --json`.
 4. If the device is `Not shared`, run the elevated bind command shown by `hurry attach <role|busid> --dry-run`.
 5. Run `hurry attach <role|busid>` and confirm `/dev/ttyUSB*`, `/dev/ttyACM*`, or `/dev/input/js*` appears in WSL2.
-6. Run `hurry ros export --format launch` and use the output in a ROS 2 launch flow.
+6. For USB-CAN or controller serial links, run `hurry serial send --dry-run` first, then send the frame after confirming the protocol.
+7. Run `hurry ros export --format launch` and use the output in a ROS 2 launch flow.
 
 ## Troubleshooting
 
@@ -358,6 +407,16 @@ hurry attach <busid>
 
 Bluetooth gamepads are not solved in v1 by attaching the Bluetooth adapter. Prefer a wired USB controller or USB serial/CAN device for v1 validation. Windows-only Bluetooth/XInput/GameInput bridging belongs to the later C++ agent path.
 If `hurry scan --json` shows `windows_input_bridge`, the controller is connected on Windows, but there is still no WSL native `/dev/input/js*` path yet.
+
+### USB-CAN is a serial protocol device
+
+Many USB-CAN adapters expose a vendor serial protocol through their own conversion chip. If WSL sees `/dev/ttyUSB0` or `/dev/serial/by-id/...`, v1 writes the vendor protocol frame directly:
+
+```bash
+hurry serial send --port /dev/serial/by-id/<your-device> --baud 115200 --hex "01 03 00 00"
+```
+
+If `hurry scan --json` only shows `windows_com_pending`, Windows sees the COM port but usbipd currently has no attachable bus id. Replug the adapter or restart the usbipd service, then scan again.
 
 ## Development
 

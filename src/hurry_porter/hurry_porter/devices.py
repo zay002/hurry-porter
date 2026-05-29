@@ -10,6 +10,7 @@ from . import system, usbipd
 from .config import HurryConfig, apply_roles
 from .lan import probe_configured, scan_cidr
 from .models import DeviceDescriptor, ScanResult, TransportCandidate
+from .serial_setup import scan_windows_com_ports
 
 
 SERIAL_HINTS = re.compile(r"CH340|CP210|USB Serial|UART|CDC|FTDI|STLink|ST-Link", re.I)
@@ -33,6 +34,7 @@ def scan_devices(
     usb_devices, usb_warnings = scan_windows_usb()
     warnings.extend(usb_warnings)
     devices.extend(usb_devices)
+    devices.extend(scan_windows_serial_ports(usb_devices))
     gamepads, gamepad_warnings = scan_windows_gamepads()
     warnings.extend(gamepad_warnings)
     devices.extend(gamepads)
@@ -79,6 +81,58 @@ def scan_windows_usb() -> tuple[list[DeviceDescriptor], list[str]]:
             )
         )
     return devices, warnings
+
+
+def scan_windows_serial_ports(existing_usb_devices: list[DeviceDescriptor] | None = None) -> list[DeviceDescriptor]:
+    existing_bus_ids = {device.bus_id for device in existing_usb_devices or [] if device.bus_id}
+    existing_identities = {
+        (device.vid, device.pid)
+        for device in existing_usb_devices or []
+        if device.kind == "serial" and device.vid and device.pid
+    }
+    devices: list[DeviceDescriptor] = []
+    for port in scan_windows_com_ports():
+        vid, pid = parse_usb_vid_pid(port.device_id or "")
+        if port.bus_id and port.bus_id in existing_bus_ids:
+            continue
+        if not port.bus_id and vid and pid and (vid, pid) in existing_identities:
+            continue
+        has_bus_id = bool(port.bus_id)
+        warnings = [] if has_bus_id else ["Windows reports this COM port, but usbipd currently has no attachable bus id"]
+        command_preview = f"usbipd.exe attach --wsl --busid {port.bus_id}" if has_bus_id else None
+        devices.append(
+            DeviceDescriptor(
+                id=f"windows-com:{stable_id(port.device_id or port.name)}",
+                kind="serial",
+                locality="windows_host",
+                state=port.status or ("bus_id_missing" if not has_bus_id else "present"),
+                name=port.name,
+                bus_id=port.bus_id,
+                vid=vid,
+                pid=pid,
+                metadata={
+                    "source": "windows_com",
+                    "device_id": port.device_id or "",
+                    "manufacturer": port.manufacturer or "",
+                },
+                transports=[
+                    TransportCandidate(
+                        kind="usbipd" if has_bus_id else "windows_com_pending",
+                        endpoint=port.bus_id or port.device_id or port.name,
+                        priority=12,
+                        latency_class="near_native" if has_bus_id else "blocked_until_bus_id",
+                        command_preview=command_preview,
+                        warnings=warnings,
+                    )
+                ],
+                recommendation=(
+                    "attach with usbipd-win"
+                    if has_bus_id
+                    else "replug the USB serial adapter or restart usbipd service until usbipd reports a bus id"
+                ),
+            )
+        )
+    return devices
 
 
 def scan_windows_gamepads() -> tuple[list[DeviceDescriptor], list[str]]:
@@ -328,3 +382,10 @@ def _lower(value: str | None) -> str | None:
 
 def stable_id(value: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]+", "_", value).strip("_").lower()[:96] or "device"
+
+
+def parse_usb_vid_pid(value: str) -> tuple[str | None, str | None]:
+    match = re.search(r"VID_([0-9A-Fa-f]{4})&PID_([0-9A-Fa-f]{4})", value)
+    if not match:
+        return None, None
+    return match.group(1).lower(), match.group(2).lower()

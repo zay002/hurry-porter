@@ -107,7 +107,7 @@ def setup_serial() -> SerialSetupReport:
     hints = [
         "Install Windows drivers only from the chip vendor or the device vendor.",
         "After usbipd attach, Linux should expose serial bridges as /dev/ttyUSB* or /dev/ttyACM*.",
-        "For serial CAN adapters, first verify the serial node, then configure slcand/can-utils if the adapter uses SLCAN.",
+        "For USB-CAN adapters with a vendor serial protocol, first verify the serial node, then send the protocol frame with `hurry serial send`.",
     ]
     return SerialSetupReport(
         modules=modules,
