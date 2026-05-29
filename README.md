@@ -1,0 +1,215 @@
+# hurry-porter
+
+**hurry-porter 是面向 ROS 2 on WSL2 的即插即用硬件编排器。**
+
+它不替代 [`usbipd-win`](https://github.com/dorssel/usbipd-win)，也不重写 USB/IP。它负责把真实开发中最烦的部分串起来：WSL/ROS 环境诊断、Windows USB 设备发现、`usbipd-win` attach 工作流、WSL 串口/手柄识别、局域网机器人探测、稳定角色命名，以及 ROS launch/env 参数导出。
+
+## 为什么需要它
+
+很多机器人开发者会在 Windows 笔记本上用 WSL2 跑 ROS 2，再去控制真实硬件。这个组合很方便，但硬件链路通常很零碎：
+
+- USB 串口控制板需要先从 Windows attach 到 WSL2。
+- 手柄可能是 USB、Bluetooth、XInput、HID，不同路径延迟和可见性不同。
+- 一些机械臂、雷达或控制器走 TCP/IP，应该由 WSL2 直接连接。
+- ROS launch 文件需要稳定的串口路径、设备角色和网络 endpoint。
+- 掉线、重插、bus id 变化后，开发者需要重复手工排查。
+
+`hurry-porter` 的目标是把这些步骤变成一条清晰、可诊断、可自动化的工作流。
+
+## 当前能力
+
+- `hurry doctor`：检查 WSL2、mirrored networking、ROS 环境、Python ABI、`usbipd-win`、`winget`、`lsusb`、`udevadm`、串口和手柄设备。
+- `hurry scan --json`：发现 Windows USB、WSL native serial/input、配置的局域网设备。
+- `hurry attach`：通过 `usbipd-win` 将 Windows USB 设备 attach 到当前 WSL2；需要管理员 bind 时给出明确 PowerShell 命令，默认不自动提权。
+- `hurry watch`：周期扫描设备，并可对 `hurry.toml` 中标记的设备自动 attach。
+- `hurry ros export`：导出 ROS 2 launch/env 可消费的串口、手柄、LAN 参数。
+- `hurry_porter_cpp`：ROS 2 C++ 扩展点，用于后续 GameInput / Hyper-V sockets / Windows-only 输入桥接。
+
+## 快速开始
+
+### 1. 安装 usbipd-win
+
+在 Windows PowerShell 中安装：
+
+```powershell
+winget install --interactive --exact dorssel.usbipd-win
+```
+
+### 2. 构建 ROS 2 workspace
+
+在 WSL2 中：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+colcon build
+source install/setup.bash
+```
+
+### 3. 诊断和扫描
+
+```bash
+hurry doctor
+hurry scan --json
+```
+
+### 4. 配置设备角色
+
+复制示例配置：
+
+```bash
+cp src/hurry_porter/config/hurry.example.toml hurry.toml
+```
+
+示例：
+
+```toml
+[[devices]]
+role = "base_controller"
+kind = "serial"
+description_regex = "CH340|CP210|USB Serial|UART|CDC|FTDI"
+auto_attach = true
+preferred_transport = "usbipd"
+
+[[devices]]
+role = "gamepad"
+kind = "gamepad"
+description_regex = "Xbox|Controller|Gamepad|Joystick|DualSense"
+preferred_transport = "usbipd"
+
+[[devices]]
+role = "arm_controller"
+kind = "lan_robot"
+lan_host = "192.168.1.10"
+lan_ports = [502, 30002]
+preferred_transport = "lan"
+```
+
+### 5. Attach 和导出 ROS 参数
+
+```bash
+hurry attach base_controller --dry-run
+hurry attach base_controller
+hurry ros export
+hurry ros export --format json
+hurry ros export --format launch
+```
+
+## 设计原则
+
+- **复用成熟工具**：USB 主通道使用 `usbipd-win`，不重复造 USB/IP。
+- **ROS 原生**：主 CLI 使用 Python，低延迟扩展使用 C++，符合 ROS 2 社区习惯。
+- **最低延迟优先**：USB 串口/USB 手柄优先 attach 到 WSL2 原生设备节点；LAN 设备由 WSL2 直接连接；Windows-only 输入桥接放到后续 C++ agent。
+- **默认可诊断**：每个失败路径都应该给出下一步命令，而不是只抛异常。
+
+## 开发与测试
+
+```bash
+source /opt/ros/jazzy/setup.bash
+colcon build
+colcon test
+python3.12 -m pytest -q
+```
+
+运行 C++ 扩展点探针：
+
+```bash
+ros2 run hurry_porter_cpp hurry_latency_probe --ros-args -p transport:=placeholder
+```
+
+## 路线图
+
+- 更完整的 `usbipd-win` 输出兼容和错误恢复。
+- 自动生成 ROS 2 launch include / parameters 文件。
+- udev 稳定命名辅助。
+- Windows-only 手柄桥接：GameInput / XInput -> Hyper-V sockets / AF_VSOCK -> ROS `/joy`。
+- 设备热插拔恢复和机器人 profile。
+
+---
+
+# hurry-porter
+
+**hurry-porter is a plug-and-play hardware orchestrator for ROS 2 on WSL2.**
+
+It does not replace [`usbipd-win`](https://github.com/dorssel/usbipd-win), and it does not reimplement USB/IP. Instead, it connects the practical pieces developers need every day: WSL/ROS diagnostics, Windows USB discovery, `usbipd-win` attach workflows, WSL serial/gamepad detection, LAN robot probing, stable role naming, and ROS launch/env export.
+
+## Why
+
+Many robotics developers run ROS 2 inside WSL2 on a Windows laptop while controlling real hardware. That setup is convenient, but the hardware path can be fragmented:
+
+- USB serial controllers must be attached from Windows into WSL2.
+- Controllers may appear through USB, Bluetooth, XInput, or HID with different latency and visibility tradeoffs.
+- Some robot arms, LiDARs, or controllers use TCP/IP and should be reached directly from WSL2.
+- ROS launch files need stable serial paths, device roles, and network endpoints.
+- Replugging devices can change bus ids and force repeated manual debugging.
+
+`hurry-porter` turns those steps into a diagnosable and automatable workflow.
+
+## Features
+
+- `hurry doctor`: checks WSL2, mirrored networking, ROS, Python ABI, `usbipd-win`, `winget`, `lsusb`, `udevadm`, serial devices, and gamepads.
+- `hurry scan --json`: discovers Windows USB devices, WSL native serial/input devices, and configured LAN devices.
+- `hurry attach`: attaches Windows USB devices into WSL2 through `usbipd-win`; elevated bind commands are shown explicitly and are not run by default.
+- `hurry watch`: periodically scans devices and can auto-attach devices marked in `hurry.toml`.
+- `hurry ros export`: exports serial, gamepad, and LAN values for ROS 2 launch/env usage.
+- `hurry_porter_cpp`: ROS 2 C++ extension point for future GameInput / Hyper-V sockets / Windows-only input bridges.
+
+## Quick Start
+
+Install `usbipd-win` from Windows PowerShell:
+
+```powershell
+winget install --interactive --exact dorssel.usbipd-win
+```
+
+Build in WSL2:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+colcon build
+source install/setup.bash
+```
+
+Diagnose and scan:
+
+```bash
+hurry doctor
+hurry scan --json
+```
+
+Create a local config:
+
+```bash
+cp src/hurry_porter/config/hurry.example.toml hurry.toml
+```
+
+Attach and export:
+
+```bash
+hurry attach base_controller --dry-run
+hurry attach base_controller
+hurry ros export
+hurry ros export --format json
+hurry ros export --format launch
+```
+
+## Development
+
+```bash
+source /opt/ros/jazzy/setup.bash
+colcon build
+colcon test
+python3.12 -m pytest -q
+```
+
+Run the C++ extension probe:
+
+```bash
+ros2 run hurry_porter_cpp hurry_latency_probe --ros-args -p transport:=placeholder
+```
+
+## Design Principles
+
+- Reuse mature tooling: USB forwarding is delegated to `usbipd-win`.
+- Stay ROS-native: Python for orchestration, C++ for low-latency bridge points.
+- Prefer the lowest-latency path: direct WSL device nodes for USB/serial/gamepads, direct TCP/IP for LAN robots, Windows-only bridges later.
+- Make failures actionable: diagnostics should point to the next command to run.

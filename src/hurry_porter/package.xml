@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>hurry_porter</name>
+  <version>0.1.0</version>
+  <description>Hardware orchestration CLI for ROS 2 on WSL2.</description>
+  <maintainer email="zay002@example.com">zay002</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>python3-yaml</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
+
