@@ -19,6 +19,7 @@
 ## 当前能力
 
 - `hurry doctor`：检查 WSL2、mirrored networking、ROS 环境、Python ABI、`usbipd-win`、`winget`、`lsusb`、`udevadm`、串口和手柄设备。
+- `hurry init`：生成 `hurry.toml`，也可以根据当前扫描结果生成候选设备规则。
 - `hurry scan --json`：发现 Windows USB、WSL native serial/input、配置的局域网设备。
 - `hurry attach`：通过 `usbipd-win` 将 Windows USB 设备 attach 到当前 WSL2；需要管理员 bind 时给出明确 PowerShell 命令，默认不自动提权。
 - `hurry watch`：周期扫描设备，并可对 `hurry.toml` 中标记的设备自动 attach。
@@ -63,15 +64,25 @@ hurry scan --json
 
 ### 4. 配置设备角色
 
-复制示例配置：
+生成示例配置：
 
 ```bash
-cp src/hurry_porter/config/hurry.example.toml hurry.toml
+hurry init
+```
+
+也可以根据当前可见设备生成候选规则，再人工调整 role：
+
+```bash
+hurry init --from-scan --force
 ```
 
 示例：
 
 ```toml
+[watch]
+interval_seconds = 2.0
+auto_attach = true
+
 [[devices]]
 role = "base_controller"
 kind = "serial"
@@ -98,6 +109,7 @@ preferred_transport = "lan"
 ```bash
 hurry attach base_controller --dry-run
 hurry attach base_controller
+hurry watch --once --dry-run
 hurry ros export
 hurry ros export --format json
 hurry ros export --format launch
@@ -175,6 +187,7 @@ Many robotics developers run ROS 2 inside WSL2 on a Windows laptop while control
 ## Features
 
 - `hurry doctor`: checks WSL2, mirrored networking, ROS, Python ABI, `usbipd-win`, `winget`, `lsusb`, `udevadm`, serial devices, and gamepads.
+- `hurry init`: creates `hurry.toml`, optionally using the current scan to generate candidate device rules.
 - `hurry scan --json`: discovers Windows USB devices, WSL native serial/input devices, and configured LAN devices.
 - `hurry attach`: attaches Windows USB devices into WSL2 through `usbipd-win`; elevated bind commands are shown explicitly and are not run by default.
 - `hurry watch`: periodically scans devices and can auto-attach devices marked in `hurry.toml`.
@@ -216,7 +229,8 @@ hurry scan --json
 Create a local config:
 
 ```bash
-cp src/hurry_porter/config/hurry.example.toml hurry.toml
+hurry init
+hurry init --from-scan --force
 ```
 
 Attach and export:
@@ -224,6 +238,7 @@ Attach and export:
 ```bash
 hurry attach base_controller --dry-run
 hurry attach base_controller
+hurry watch --once --dry-run
 hurry ros export
 hurry ros export --format json
 hurry ros export --format launch

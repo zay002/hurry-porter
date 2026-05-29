@@ -44,6 +44,8 @@ jobs:
           . /opt/ros/jazzy/setup.sh
           . install/setup.sh
           hurry --help
+          hurry init --print
           hurry setup usbipd --json || true
           hurry scan --json
+          hurry watch --once --json --no-attach
           hurry ros export --format json

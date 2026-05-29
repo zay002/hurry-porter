@@ -1,4 +1,9 @@
-# Copy this file to hurry.toml in your ROS workspace root.
+# hurry.toml
+# Copy this file to the root of your ROS 2 workspace and edit roles as needed.
+
+[watch]
+interval_seconds = 2.0
+auto_attach = true
 
 [[devices]]
 role = "base_controller"
@@ -20,4 +25,3 @@ kind = "lan_robot"
 lan_host = "192.168.1.10"
 lan_ports = [502, 30002]
 preferred_transport = "lan"
-

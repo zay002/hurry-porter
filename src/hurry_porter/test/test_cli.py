@@ -116,3 +116,64 @@ def test_ros_export_json_uses_discovered_devices(monkeypatch, capsys):
 
     assert exit_code == 0
     assert output["exports"]["HURRY_BASE_CONTROLLER_PORT"] == "/dev/ttyUSB0"
+
+
+def test_init_prints_default_config(capsys):
+    exit_code = main(["init", "--print"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "[watch]" in output
+    assert 'role = "base_controller"' in output
+
+
+def test_init_from_scan_writes_candidate_config(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "hurry_porter.cli.scan_devices",
+        lambda config, lan_cidr=None, lan_ports=None: ScanResult(
+            devices=[
+                DeviceDescriptor(
+                    id="usbipd:3-2",
+                    kind="serial",
+                    locality="windows_host",
+                    state="Shared",
+                    name="USB-SERIAL CH340",
+                    bus_id="3-2",
+                    vid="1a86",
+                    pid="7523",
+                )
+            ],
+            warnings=[],
+        ),
+    )
+    target = tmp_path / "hurry.toml"
+
+    exit_code = main(["init", str(target), "--from-scan"])
+
+    assert exit_code == 0
+    assert 'role = "base_controller"' in target.read_text(encoding="utf-8")
+
+
+def test_watch_once_json_dry_runs_auto_attach(monkeypatch, capsys):
+    device = DeviceDescriptor(
+        id="usbipd:3-2",
+        kind="serial",
+        locality="windows_host",
+        state="Shared",
+        name="USB-SERIAL CH340",
+        bus_id="3-2",
+        role="base_controller",
+        metadata={"auto_attach": "true"},
+    )
+    monkeypatch.setattr(
+        "hurry_porter.cli.scan_devices",
+        lambda config: ScanResult(devices=[device], warnings=[]),
+    )
+
+    exit_code = main(["watch", "--once", "--dry-run", "--json"])
+    output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert output["devices"][0]["id"] == "usbipd:3-2"
+    assert output["attach_results"][0]["ok"] is True
+    assert "attach --wsl --busid 3-2" in output["attach_results"][0]["attach_command"]
