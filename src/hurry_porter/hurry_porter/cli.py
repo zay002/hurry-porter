@@ -11,6 +11,7 @@ from .devices import scan_devices
 from .doctor import collect_doctor_report
 from .models import DeviceDescriptor, to_jsonable
 from .ros_export import render_exports
+from .serial_setup import setup_serial
 from .usbipd import attach as usbipd_attach
 from .usbipd import bind_command, bind_elevated
 from .windows_setup import setup_usbipd
@@ -82,6 +83,9 @@ def build_parser() -> argparse.ArgumentParser:
     setup_usbipd_parser.add_argument("--run", action="store_true", help="Launch winget install instead of printing guidance")
     setup_usbipd_parser.add_argument("--json", action="store_true", help="Print machine-readable setup output")
     setup_usbipd_parser.set_defaults(handler=cmd_setup_usbipd)
+    setup_serial_parser = setup_sub.add_parser("serial", help="Check common USB serial drivers and setup guidance")
+    setup_serial_parser.add_argument("--json", action="store_true", help="Print machine-readable serial setup output")
+    setup_serial_parser.set_defaults(handler=cmd_setup_serial)
 
     ros = sub.add_parser("ros", help="ROS integration helpers")
     ros_sub = ros.add_subparsers(dest="ros_command")
@@ -252,6 +256,43 @@ def cmd_setup_usbipd(args: argparse.Namespace) -> int:
         if result.stderr:
             print(result.stderr.strip(), file=sys.stderr)
     return 0 if result.ok else 1
+
+
+def cmd_setup_serial(args: argparse.Namespace) -> int:
+    report = setup_serial()
+    if args.json:
+        print(json.dumps(to_jsonable(report), indent=2, sort_keys=True))
+        return 0
+
+    print("WSL serial kernel modules")
+    for module in report.modules:
+        status = "ok" if module.ok else "warn"
+        detail = f" ({module.detail})" if module.detail else ""
+        print(f"{status:4} {module.module}{detail}")
+
+    print("\nWindows COM ports")
+    if report.windows_com_ports:
+        for port in report.windows_com_ports:
+            manufacturer = f" [{port.manufacturer}]" if port.manufacturer else ""
+            status = f" {port.status}" if port.status else ""
+            bus_id = f" busid={port.bus_id}" if port.bus_id else ""
+            print(f"ok   {port.name}{manufacturer}{status}{bus_id}")
+    else:
+        print("warn no Windows COM ports detected right now")
+
+    print("\nCommon Windows serial driver sources")
+    for guide in report.driver_guides:
+        chips = ", ".join(guide.chips)
+        print(f"- {guide.name}: {chips}")
+        print(f"  Linux module: {guide.linux_module}")
+        print(f"  Windows driver: {guide.windows_driver_url}")
+        for note in guide.notes:
+            print(f"  note: {note}")
+
+    print("\nHints")
+    for hint in report.hints:
+        print(f"- {hint}")
+    return 0
 
 
 def cmd_ros_export(args: argparse.Namespace) -> int:

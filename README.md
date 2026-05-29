@@ -45,7 +45,28 @@ hurry setup usbipd --run
 
 `--run` 会通过 Windows `winget` 启动安装，可能弹出 UAC 或安装确认窗口。这一步需要人工确认。
 
-### 2. 构建 ROS 2 workspace
+### 2. 检查常见串口驱动
+
+很多机器人控制板、USB-CAN、USB-RS485、Arduino/ESP32 开发板在 Windows 侧会先表现为 COM 口，在 WSL attach 后表现为 `/dev/ttyUSB*` 或 `/dev/ttyACM*`。先运行：
+
+```bash
+hurry setup serial
+hurry setup serial --json
+```
+
+它会检查 WSL 内核是否有常见串口模块，并列出 Windows 侧常见官方驱动入口：
+
+| 芯片/协议 | WSL/Linux 模块 | Windows 驱动入口 |
+| --- | --- | --- |
+| WCH CH340/CH341 | `ch341` | <https://www.wch-ic.com/downloads/CH341SER_EXE.html> |
+| Silicon Labs CP210x | `cp210x` | <https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers> |
+| FTDI VCP | `ftdi_sio` | <https://ftdichip.com/drivers/vcp-drivers/> |
+| Prolific PL2303 | `pl2303` | <https://www.prolific.com.tw/en/portfolio-item/pl2303gd/> |
+| USB CDC ACM | `cdc_acm` | 通常使用 Windows/Linux 内置驱动 |
+
+只从芯片厂商或设备厂商安装 Windows 驱动。WSL 侧通常不需要下载驱动，只要内核模块存在即可。
+
+### 3. 构建 ROS 2 workspace
 
 在 WSL2 中：
 
@@ -55,14 +76,14 @@ colcon build
 source install/setup.bash
 ```
 
-### 3. 诊断和扫描
+### 4. 诊断和扫描
 
 ```bash
 hurry doctor
 hurry scan --json
 ```
 
-### 4. 配置设备角色
+### 5. 配置设备角色
 
 生成示例配置：
 
@@ -104,7 +125,7 @@ lan_ports = [502, 30002]
 preferred_transport = "lan"
 ```
 
-### 5. Attach 和导出 ROS 参数
+### 6. Attach 和导出 ROS 参数
 
 ```bash
 hurry attach base_controller --dry-run
@@ -247,6 +268,25 @@ hurry setup usbipd --run
 ```
 
 `--run` launches Windows `winget` and may show UAC or installer prompts. This step needs manual confirmation.
+
+Check common serial drivers:
+
+```bash
+hurry setup serial
+hurry setup serial --json
+```
+
+Many robot controllers, USB-CAN adapters, USB-RS485 adapters, and Arduino/ESP32 boards appear as Windows COM ports first, then as `/dev/ttyUSB*` or `/dev/ttyACM*` after WSL attach. `hurry setup serial` checks common WSL kernel modules and points to official Windows driver sources:
+
+| Chip/protocol | WSL/Linux module | Windows driver source |
+| --- | --- | --- |
+| WCH CH340/CH341 | `ch341` | <https://www.wch-ic.com/downloads/CH341SER_EXE.html> |
+| Silicon Labs CP210x | `cp210x` | <https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers> |
+| FTDI VCP | `ftdi_sio` | <https://ftdichip.com/drivers/vcp-drivers/> |
+| Prolific PL2303 | `pl2303` | <https://www.prolific.com.tw/en/portfolio-item/pl2303gd/> |
+| USB CDC ACM | `cdc_acm` | Usually built into Windows/Linux |
+
+Install Windows drivers only from the chip vendor or the device vendor. On WSL, no vendor download is usually needed when the kernel module exists.
 
 Build in WSL2:
 

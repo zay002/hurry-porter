@@ -2,6 +2,7 @@ import json
 
 from hurry_porter.cli import main
 from hurry_porter.models import DeviceDescriptor, ScanResult
+from hurry_porter.serial_setup import KernelModuleStatus, SerialDriverGuide, SerialSetupReport, WindowsComPort
 from hurry_porter.windows_setup import SetupResult
 
 
@@ -24,6 +25,34 @@ def test_setup_usbipd_json_reports_existing_install(monkeypatch, capsys):
     assert exit_code == 0
     assert output["installed"] is True
     assert output["component"] == "usbipd-win"
+
+
+def test_setup_serial_json_reports_modules_and_driver_guides(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "hurry_porter.cli.setup_serial",
+        lambda: SerialSetupReport(
+            modules=[KernelModuleStatus(module="ch341", ok=True)],
+            windows_com_ports=[WindowsComPort(name="USB-SERIAL CH340 (COM5)", manufacturer="wch.cn", status="OK")],
+            driver_guides=[
+                SerialDriverGuide(
+                    key="wch_ch34x",
+                    name="WCH CH340/CH341",
+                    chips=["CH340"],
+                    linux_module="ch341",
+                    windows_driver_url="https://www.wch-ic.com/downloads/CH341SER_EXE.html",
+                )
+            ],
+            hints=["attach through usbipd-win"],
+        ),
+    )
+
+    exit_code = main(["setup", "serial", "--json"])
+    output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert output["modules"][0]["module"] == "ch341"
+    assert output["windows_com_ports"][0]["name"] == "USB-SERIAL CH340 (COM5)"
+    assert output["driver_guides"][0]["key"] == "wch_ch34x"
 
 
 def test_attach_not_shared_device_reports_elevated_bind(monkeypatch, capsys):
