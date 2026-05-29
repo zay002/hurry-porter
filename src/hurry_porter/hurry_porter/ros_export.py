@@ -11,7 +11,7 @@ def build_exports(devices: list[DeviceDescriptor]) -> dict[str, str]:
     exports: dict[str, str] = {}
     role_counts: dict[str, int] = {}
 
-    for device in devices:
+    for device in exportable_devices(devices):
         role = sanitize_role(device.role or device.kind)
         role_counts[role] = role_counts.get(role, 0) + 1
         if not device.role and role_counts[role] > 1:
@@ -31,6 +31,29 @@ def build_exports(devices: list[DeviceDescriptor]) -> dict[str, str]:
             exports[f"{prefix}_BUSID"] = device.bus_id
 
     return exports
+
+
+def exportable_devices(devices: list[DeviceDescriptor]) -> list[DeviceDescriptor]:
+    native_keys = {
+        identity_key(device)
+        for device in devices
+        if device.locality == "wsl_native" and identity_key(device)
+    }
+    selected: list[DeviceDescriptor] = []
+    for device in devices:
+        if device.locality == "windows_host":
+            if identity_key(device) in native_keys:
+                continue
+            if not device.role and device.kind not in {"serial", "gamepad"}:
+                continue
+        selected.append(device)
+    return selected
+
+
+def identity_key(device: DeviceDescriptor) -> tuple[str | None, str | None, str | None] | None:
+    if not device.vid or not device.pid:
+        return None
+    return (device.kind, device.vid.lower(), device.pid.lower())
 
 
 def render_exports(devices: list[DeviceDescriptor], output_format: str) -> str:

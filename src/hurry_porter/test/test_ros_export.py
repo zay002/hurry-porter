@@ -1,7 +1,7 @@
 import json
 
 from hurry_porter.models import DeviceDescriptor
-from hurry_porter.ros_export import build_exports, render_exports, sanitize_role, shell_quote
+from hurry_porter.ros_export import build_exports, exportable_devices, render_exports, sanitize_role, shell_quote
 
 
 def test_build_exports_for_serial_gamepad_and_lan():
@@ -62,6 +62,47 @@ def test_render_exports_json_and_launch_formats_are_machine_readable():
 
     assert json_output["exports"]["HURRY_BASE_BUSID"] == "1-4"
     assert launch_output == "base_busid:=1-4"
+
+
+def test_exportable_devices_prefers_attached_wsl_runtime_device():
+    devices = [
+        DeviceDescriptor(
+            id="usbipd:4-3",
+            kind="serial",
+            locality="windows_host",
+            state="Attached",
+            name="USB-SERIAL CH340",
+            bus_id="4-3",
+            vid="1a86",
+            pid="7523",
+        ),
+        DeviceDescriptor(
+            id="serial:/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
+            kind="serial",
+            locality="wsl_native",
+            state="present",
+            name="CH340 serial converter",
+            stable_path="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
+            vid="1a86",
+            pid="7523",
+        ),
+        DeviceDescriptor(
+            id="usbipd:2-8",
+            kind="usb",
+            locality="windows_host",
+            state="Not shared",
+            name="Internal webcam",
+            bus_id="2-8",
+            vid="13d3",
+            pid="56eb",
+        ),
+    ]
+
+    selected = exportable_devices(devices)
+    exports = build_exports(devices)
+
+    assert [device.id for device in selected] == ["serial:/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"]
+    assert exports == {"HURRY_SERIAL_PORT": "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"}
 
 
 def test_render_params_file_uses_ros2_wildcard_schema():
