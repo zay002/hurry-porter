@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import glob
+import json
 import os
 import re
 from pathlib import Path
@@ -13,6 +14,12 @@ from .models import DeviceDescriptor, ScanResult, TransportCandidate
 
 SERIAL_HINTS = re.compile(r"CH340|CP210|USB Serial|UART|CDC|FTDI|STLink|ST-Link", re.I)
 GAMEPAD_HINTS = re.compile(r"Xbox|Controller|Gamepad|Joystick|DualSense|Wireless Controller", re.I)
+WINDOWS_GAMEPAD_HINTS = re.compile(
+    r"Pro Controller|Xbox.*Controller|Wireless Controller|DualSense|DualShock|8BitDo|Gamepad",
+    re.I,
+)
+WINDOWS_GENERIC_GAMEPAD_HINTS = re.compile(r"HID-compliant game controller", re.I)
+WINDOWS_GAMEPAD_IGNORE = re.compile(r"Driver|Emulation|Virtual Gamepad|Bus", re.I)
 
 
 def scan_devices(
@@ -26,6 +33,9 @@ def scan_devices(
     usb_devices, usb_warnings = scan_windows_usb()
     warnings.extend(usb_warnings)
     devices.extend(usb_devices)
+    gamepads, gamepad_warnings = scan_windows_gamepads()
+    warnings.extend(gamepad_warnings)
+    devices.extend(gamepads)
     devices.extend(scan_wsl_serial())
     devices.extend(scan_wsl_input())
     devices.extend(scan_configured_lan(config))
@@ -69,6 +79,85 @@ def scan_windows_usb() -> tuple[list[DeviceDescriptor], list[str]]:
             )
         )
     return devices, warnings
+
+
+def scan_windows_gamepads() -> tuple[list[DeviceDescriptor], list[str]]:
+    result = system.powershell(
+        r"""
+$devices = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+  Where-Object {
+    $_.Status -eq 'OK' -and (
+      $_.FriendlyName -match 'Pro Controller|Xbox.*Controller|Wireless Controller|DualSense|DualShock|8BitDo|Gamepad' -or
+      $_.FriendlyName -match 'HID-compliant game controller'
+    )
+  } |
+  Select-Object Status,Class,FriendlyName,InstanceId
+$devices | ConvertTo-Json -Compress
+""",
+        timeout=12.0,
+    )
+    if not result.ok or not result.stdout.strip():
+        return [], []
+    return parse_windows_gamepads(result.stdout), []
+
+
+def parse_windows_gamepads(text: str) -> list[DeviceDescriptor]:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+
+    rows = payload if isinstance(payload, list) else [payload]
+    raw_rows = [
+        row
+        for row in rows
+        if isinstance(row, dict)
+        and row.get("FriendlyName")
+        and row.get("InstanceId")
+        and not WINDOWS_GAMEPAD_IGNORE.search(str(row.get("FriendlyName")))
+        and str(row.get("Class") or "") != "System"
+    ]
+    named_rows = [row for row in raw_rows if WINDOWS_GAMEPAD_HINTS.search(str(row.get("FriendlyName")))]
+    rows_to_use = named_rows or [
+        row for row in raw_rows if WINDOWS_GENERIC_GAMEPAD_HINTS.search(str(row.get("FriendlyName")))
+    ]
+
+    devices: list[DeviceDescriptor] = []
+    seen: set[str] = set()
+    for row in rows_to_use:
+        instance_id = str(row["InstanceId"])
+        if instance_id in seen:
+            continue
+        seen.add(instance_id)
+        name = str(row["FriendlyName"])
+        status = str(row.get("Status") or "unknown")
+        devices.append(
+            DeviceDescriptor(
+                id=f"windows-gamepad:{stable_id(instance_id)}",
+                kind="gamepad",
+                locality="windows_host",
+                state=status,
+                name=name,
+                metadata={
+                    "class": str(row.get("Class") or ""),
+                    "instance_id": instance_id,
+                    "windows_input": "true",
+                },
+                transports=[
+                    TransportCandidate(
+                        kind="windows_input_bridge",
+                        endpoint=instance_id,
+                        priority=30,
+                        latency_class="bridge_planned",
+                        warnings=[
+                            "Windows Bluetooth/HID gamepad is visible, but WSL native /dev/input support requires a future Windows input bridge or USB attach"
+                        ],
+                    )
+                ],
+                recommendation="use a wired USB attach path for v1, or the planned Windows input bridge in v2",
+            )
+        )
+    return devices
 
 
 def scan_wsl_serial() -> list[DeviceDescriptor]:
@@ -236,3 +325,6 @@ def input_name(js_name: str) -> str | None:
 def _lower(value: str | None) -> str | None:
     return value.lower() if value else None
 
+
+def stable_id(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9]+", "_", value).strip("_").lower()[:96] or "device"

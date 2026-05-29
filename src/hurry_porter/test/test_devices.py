@@ -1,6 +1,7 @@
 from hurry_porter.config import DeviceRule, HurryConfig, apply_roles
-from hurry_porter.devices import scan_configured_lan, scan_lan_cidr
+from hurry_porter.devices import parse_windows_gamepads, scan_configured_lan, scan_lan_cidr, scan_windows_gamepads
 from hurry_porter.lan import ProbeResult
+from hurry_porter.system import CommandResult
 from hurry_porter.models import DeviceDescriptor
 
 
@@ -74,3 +75,53 @@ def test_scan_lan_cidr_converts_open_probes_to_devices(monkeypatch):
     assert devices[0].metadata["latency_ms"] == "3.4"
     assert devices[0].transports[0].endpoint == "192.168.1.20:502"
 
+
+def test_parse_windows_gamepads_prefers_named_controller():
+    devices = parse_windows_gamepads(
+        """
+[
+  {
+    "Status": "OK",
+    "Class": "HIDClass",
+    "FriendlyName": "HID-compliant game controller",
+    "InstanceId": "HID\\\\VID_057E&PID_2009"
+  },
+  {
+    "Status": "OK",
+    "Class": "Bluetooth",
+    "FriendlyName": "Pro Controller",
+    "InstanceId": "BTHENUM\\\\DEV_98B69DD4790A"
+  },
+  {
+    "Status": "OK",
+    "Class": "System",
+    "FriendlyName": "Nefarius Virtual Gamepad Emulation Bus",
+    "InstanceId": "ROOT\\\\SYSTEM\\\\0004"
+  }
+]
+"""
+    )
+
+    assert len(devices) == 1
+    assert devices[0].name == "Pro Controller"
+    assert devices[0].kind == "gamepad"
+    assert devices[0].locality == "windows_host"
+    assert devices[0].transports[0].kind == "windows_input_bridge"
+    assert "future Windows input bridge" in devices[0].transports[0].warnings[0]
+
+
+def test_scan_windows_gamepads_uses_powershell(monkeypatch):
+    monkeypatch.setattr(
+        "hurry_porter.devices.system.powershell",
+        lambda script, timeout: CommandResult(
+            args=["powershell.exe"],
+            returncode=0,
+            stdout='{"Status":"OK","Class":"Bluetooth","FriendlyName":"Pro Controller","InstanceId":"BTHENUM\\\\DEV_98B69DD4790A"}',
+            stderr="",
+        ),
+    )
+
+    devices, warnings = scan_windows_gamepads()
+
+    assert warnings == []
+    assert devices[0].name == "Pro Controller"

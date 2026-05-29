@@ -20,7 +20,7 @@
 
 - `hurry doctor`：检查 WSL2、mirrored networking、ROS 环境、Python ABI、`usbipd-win`、`winget`、`lsusb`、`udevadm`、串口和手柄设备。
 - `hurry init`：生成 `hurry.toml`，也可以根据当前扫描结果生成候选设备规则。
-- `hurry scan --json`：发现 Windows USB、WSL native serial/input、配置的局域网设备。
+- `hurry scan --json`：发现 Windows USB、Windows 蓝牙/HID 手柄、WSL native serial/input、配置的局域网设备。
 - `hurry attach`：通过 `usbipd-win` 将 Windows USB 设备 attach 到当前 WSL2；需要管理员 bind 时给出明确 PowerShell 命令，默认不自动提权。
 - `hurry watch`：周期扫描设备，并可对 `hurry.toml` 中标记的设备自动 attach。
 - `hurry ros export`：导出 ROS 2 launch/env/params/launch-file 可消费的串口、手柄、LAN 参数。
@@ -183,6 +183,7 @@ hurry attach <busid>
 ```
 
 蓝牙手柄在 v1 中不会通过 attach 蓝牙适配器解决；优先测试 USB 有线手柄或 USB 串口/CAN 设备。Windows-only 蓝牙/XInput/GameInput 桥接属于后续 C++ agent 路线。
+如果 `hurry scan --json` 能看到 `windows_input_bridge`，表示手柄已经在 Windows 侧连接成功，但还没有 WSL native `/dev/input/js*` 路径。
 
 ## 设计原则
 
@@ -246,7 +247,7 @@ Many robotics developers run ROS 2 inside WSL2 on a Windows laptop while control
 
 - `hurry doctor`: checks WSL2, mirrored networking, ROS, Python ABI, `usbipd-win`, `winget`, `lsusb`, `udevadm`, serial devices, and gamepads.
 - `hurry init`: creates `hurry.toml`, optionally using the current scan to generate candidate device rules.
-- `hurry scan --json`: discovers Windows USB devices, WSL native serial/input devices, and configured LAN devices.
+- `hurry scan --json`: discovers Windows USB devices, Windows Bluetooth/HID gamepads, WSL native serial/input devices, and configured LAN devices.
 - `hurry attach`: attaches Windows USB devices into WSL2 through `usbipd-win`; elevated bind commands are shown explicitly and are not run by default.
 - `hurry watch`: periodically scans devices and can auto-attach devices marked in `hurry.toml`.
 - `hurry ros export`: exports serial, gamepad, and LAN values for ROS 2 launch/env/params/launch-file usage.
@@ -356,6 +357,7 @@ hurry attach <busid>
 ```
 
 Bluetooth gamepads are not solved in v1 by attaching the Bluetooth adapter. Prefer a wired USB controller or USB serial/CAN device for v1 validation. Windows-only Bluetooth/XInput/GameInput bridging belongs to the later C++ agent path.
+If `hurry scan --json` shows `windows_input_bridge`, the controller is connected on Windows, but there is still no WSL native `/dev/input/js*` path yet.
 
 ## Development
 
