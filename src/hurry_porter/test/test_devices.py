@@ -113,8 +113,11 @@ def test_parse_windows_gamepads_prefers_named_controller():
     assert devices[0].name == "Pro Controller"
     assert devices[0].kind == "gamepad"
     assert devices[0].locality == "windows_host"
+    assert devices[0].metadata["quirk"] == "windows_pro_controller_led_unassigned"
+    assert "do not re-pair" in devices[0].metadata["windows_led_note"]
     assert devices[0].transports[0].kind == "windows_input_bridge"
     assert "hurry gamepad bridge" in devices[0].transports[0].warnings[0]
+    assert "do not re-pair" in devices[0].transports[0].warnings[1]
 
 
 def test_scan_windows_gamepads_uses_powershell(monkeypatch):

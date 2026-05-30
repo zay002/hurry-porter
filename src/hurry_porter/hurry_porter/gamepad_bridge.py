@@ -14,7 +14,7 @@ from . import system
 
 SCHEMA = "hurry.gamepad.v1"
 DEFAULT_GAMEPAD_PORT = 47777
-DEFAULT_GAMEPAD_HZ = 250
+DEFAULT_GAMEPAD_HZ = 60
 DEFAULT_FRAME_ID = "hurry_windows_gamepad"
 DEFAULT_TOPIC = "/joy"
 DEFAULT_AGENT_INDEX = 0

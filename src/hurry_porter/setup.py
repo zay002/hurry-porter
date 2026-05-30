@@ -4,7 +4,7 @@ package_name = "hurry_porter"
 
 setup(
     name=package_name,
-    version="0.1.0",
+    version="0.2.0",
     packages=find_packages(exclude=["test"]),
     package_data={"hurry_porter": ["windows/*.ps1"]},
     data_files=[

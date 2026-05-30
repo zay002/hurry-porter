@@ -147,6 +147,10 @@ def test_gamepad_status_json_reports_native_usb_and_bluetooth_routes(monkeypatch
                     locality="windows_host",
                     state="OK",
                     name="Pro Controller",
+                    metadata={
+                        "quirk": "windows_pro_controller_led_unassigned",
+                        "windows_led_note": "Windows Bluetooth can leave Nintendo Switch Pro Controller player LEDs in the pairing/search pattern even while HID input is connected; if state is OK and /joy changes, do not re-pair.",
+                    },
                     transports=[
                         TransportCandidate(
                             kind="windows_input_bridge",
@@ -173,6 +177,8 @@ def test_gamepad_status_json_reports_native_usb_and_bluetooth_routes(monkeypatch
     assert output["gamepads"][0]["path"] == "/dev/input/js0"
     assert output["gamepads"][1]["bus_id"] == "4-1"
     assert "hurry gamepad bridge" in output["gamepads"][2]["action"]
+    assert output["gamepads"][2]["quirks"] == ["windows_pro_controller_led_unassigned"]
+    assert output["gamepads"][2]["safe_to_keep_paired"] is True
 
 
 def test_gamepad_agent_command_json(monkeypatch, capsys):

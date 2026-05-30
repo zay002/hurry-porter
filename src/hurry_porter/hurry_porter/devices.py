@@ -21,6 +21,10 @@ WINDOWS_GAMEPAD_HINTS = re.compile(
 )
 WINDOWS_GENERIC_GAMEPAD_HINTS = re.compile(r"HID-compliant game controller", re.I)
 WINDOWS_GAMEPAD_IGNORE = re.compile(r"Driver|Emulation|Virtual Gamepad|Bus", re.I)
+WINDOWS_PRO_CONTROLLER_LED_NOTE = (
+    "Windows Bluetooth can leave Nintendo Switch Pro Controller player LEDs in the pairing/search pattern even while "
+    "HID input is connected; if state is OK and /joy changes, do not re-pair."
+)
 
 
 def scan_devices(
@@ -185,6 +189,27 @@ def parse_windows_gamepads(text: str) -> list[DeviceDescriptor]:
         seen.add(instance_id)
         name = str(row["FriendlyName"])
         status = str(row.get("Status") or "unknown")
+        metadata = {
+            "class": str(row.get("Class") or ""),
+            "instance_id": instance_id,
+            "windows_input": "true",
+        }
+        transport_warnings = [
+            "Windows Bluetooth/HID gamepad is visible; use `hurry gamepad bridge` plus `hurry gamepad start-agent` to publish ROS Joy"
+        ]
+        recommendation = "use the v2 Windows gamepad bridge, or attach wired USB gamepads through usbipd when available"
+        if is_windows_pro_controller(name, instance_id):
+            metadata.update(
+                {
+                    "controller_family": "nintendo_switch_pro",
+                    "quirk": "windows_pro_controller_led_unassigned",
+                    "windows_led_note": WINDOWS_PRO_CONTROLLER_LED_NOTE,
+                }
+            )
+            transport_warnings.append(WINDOWS_PRO_CONTROLLER_LED_NOTE)
+            recommendation = (
+                "use the v2 Windows gamepad bridge; blinking player LEDs are a Windows Pro Controller LED quirk, not a pairing failure"
+            )
         devices.append(
             DeviceDescriptor(
                 id=f"windows-gamepad:{stable_id(instance_id)}",
@@ -192,26 +217,25 @@ def parse_windows_gamepads(text: str) -> list[DeviceDescriptor]:
                 locality="windows_host",
                 state=status,
                 name=name,
-                metadata={
-                    "class": str(row.get("Class") or ""),
-                    "instance_id": instance_id,
-                    "windows_input": "true",
-                },
+                metadata=metadata,
                 transports=[
                     TransportCandidate(
                         kind="windows_input_bridge",
                         endpoint=instance_id,
                         priority=30,
                         latency_class="udp_bridge",
-                        warnings=[
-                            "Windows Bluetooth/HID gamepad is visible; use `hurry gamepad bridge` plus `hurry gamepad start-agent` to publish ROS Joy"
-                        ],
+                        warnings=transport_warnings,
                     )
                 ],
-                recommendation="use the v2 Windows gamepad bridge, or attach wired USB gamepads through usbipd when available",
+                recommendation=recommendation,
             )
         )
     return devices
+
+
+def is_windows_pro_controller(name: str, instance_id: str) -> bool:
+    text = f"{name} {instance_id}".lower()
+    return "pro controller" in text or ("057e" in text and "2009" in text)
 
 
 def scan_wsl_serial() -> list[DeviceDescriptor]:

@@ -576,7 +576,7 @@ def gamepad_status_item(device: DeviceDescriptor) -> dict[str, object]:
         }
     bridge = next((transport for transport in device.transports if transport.kind == "windows_input_bridge"), None)
     if bridge:
-        return {
+        item = {
             "id": device.id,
             "name": device.name,
             "state": device.state,
@@ -585,6 +585,13 @@ def gamepad_status_item(device: DeviceDescriptor) -> dict[str, object]:
             "latency_class": bridge.latency_class,
             "action": "run `hurry gamepad bridge` in WSL and `hurry gamepad start-agent` to stream Windows Bluetooth/HID input",
         }
+        quirk = device.metadata.get("quirk")
+        if quirk:
+            item["quirks"] = [quirk]
+        if device.metadata.get("windows_led_note"):
+            item["note"] = device.metadata["windows_led_note"]
+            item["safe_to_keep_paired"] = device.state.upper() == "OK"
+        return item
     return {
         "id": device.id,
         "name": device.name,

@@ -165,7 +165,9 @@ hurry gamepad agent-command
 hurry gamepad start-agent --dry-run --json
 ```
 
-agent 默认向当前 WSL IPv4 的 UDP `47777` 发送 250Hz 输入包。ROS 侧轴映射为 `left_x,left_y,right_x,right_y,left_trigger,right_trigger,dpad_x,dpad_y`；按钮映射为 `A,B,X,Y,LB,RB,View,Menu,LStick,RStick,DPadUp,DPadDown,DPadLeft,DPadRight`。
+agent 默认向当前 WSL IPv4 的 UDP `47777` 发送 60Hz 输入包。ROS 侧轴映射为 `left_x,left_y,right_x,right_y,left_trigger,right_trigger,dpad_x,dpad_y`；按钮映射为 `A,B,X,Y,LB,RB,View,Menu,LStick,RStick,DPadUp,DPadDown,DPadLeft,DPadRight`。如果链路稳定，可以显式使用 `hurry gamepad start-agent --hz 250`。
+
+Nintendo Switch Pro Controller 在 Windows 蓝牙下可能会继续显示玩家灯搜索/配对样式，即使 Windows PnP 状态是 `OK` 且 `/joy` 输入正常变化。这通常是 Windows 没有给 Switch Pro Controller 分配玩家 LED，不代表需要重新配对。`hurry gamepad status --json` 会把这个情况标记为 `windows_pro_controller_led_unassigned`。
 
 ### 8. 配置设备角色
 
@@ -466,7 +468,9 @@ hurry gamepad agent-command
 hurry gamepad start-agent --dry-run --json
 ```
 
-The Windows agent reads `Windows.Gaming.Input` and sends UDP packets to the current WSL IPv4 on port `47777` at 250Hz. Axis order is `left_x,left_y,right_x,right_y,left_trigger,right_trigger,dpad_x,dpad_y`; button order is `A,B,X,Y,LB,RB,View,Menu,LStick,RStick,DPadUp,DPadDown,DPadLeft,DPadRight`.
+The Windows agent reads `Windows.Gaming.Input` and sends UDP packets to the current WSL IPv4 on port `47777` at 60Hz by default. Axis order is `left_x,left_y,right_x,right_y,left_trigger,right_trigger,dpad_x,dpad_y`; button order is `A,B,X,Y,LB,RB,View,Menu,LStick,RStick,DPadUp,DPadDown,DPadLeft,DPadRight`. Use `hurry gamepad start-agent --hz 250` explicitly after the link is stable.
+
+Nintendo Switch Pro Controller player LEDs may keep showing a search/pairing pattern on Windows Bluetooth even while PnP state is `OK` and `/joy` changes normally. That usually means Windows has not assigned the Switch player LEDs, not that the controller needs to be paired again. `hurry gamepad status --json` marks this as `windows_pro_controller_led_unassigned`.
 
 Create a local config:
 
