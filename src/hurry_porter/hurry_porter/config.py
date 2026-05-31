@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import ipaddress
 import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .lan import normalize_mac
 from .models import DeviceDescriptor
 
 
@@ -35,6 +37,8 @@ preferred_transport = "usbipd"
 role = "arm_controller"
 kind = "lan_robot"
 lan_host = "192.168.1.10"
+lan_mac = "aa:bb:cc:dd:ee:ff"
+lan_cidr = "192.168.1.0/24"
 lan_ports = [502, 30002]
 preferred_transport = "lan"
 """
@@ -57,6 +61,8 @@ class DeviceRule:
     busid_regex: str | None = None
     path_regex: str | None = None
     lan_host: str | None = None
+    lan_mac: str | None = None
+    lan_cidr: str | None = None
     lan_ports: list[int] = field(default_factory=list)
     auto_attach: bool = False
     preferred_transport: str | None = None
@@ -64,6 +70,16 @@ class DeviceRule:
     def matches(self, device: DeviceDescriptor) -> bool:
         if self.lan_host and device.address != self.lan_host:
             return False
+        if self.lan_mac:
+            device_mac = normalize_mac(device.metadata.get("mac") or device.metadata.get("configured_mac"))
+            if normalize_mac(self.lan_mac) != device_mac:
+                return False
+        if self.lan_cidr and device.address:
+            try:
+                if ipaddress.ip_address(device.address) not in ipaddress.ip_network(self.lan_cidr, strict=False):
+                    return False
+            except ValueError:
+                return False
         if self.vid and normalize_id(self.vid) != normalize_id(device.vid):
             return False
         if self.pid and normalize_id(self.pid) != normalize_id(device.pid):
@@ -95,7 +111,7 @@ class HurryConfig:
 
     @property
     def lan_rules(self) -> list[DeviceRule]:
-        return [rule for rule in self.rules if rule.lan_host]
+        return [rule for rule in self.rules if rule.lan_host or rule.lan_mac]
 
 
 def normalize_id(value: str | None) -> str | None:
@@ -177,6 +193,8 @@ def _rule_from_mapping(data: dict[str, Any]) -> DeviceRule:
         busid_regex=_optional_str(data.get("busid_regex")),
         path_regex=_optional_str(data.get("path_regex") or data.get("stable_path_regex")),
         lan_host=_optional_str(data.get("lan_host") or data.get("host")),
+        lan_mac=_optional_str(data.get("lan_mac") or data.get("mac")),
+        lan_cidr=_optional_str(data.get("lan_cidr") or data.get("cidr") or data.get("network")),
         lan_ports=[int(port) for port in ports],
         auto_attach=bool(data.get("auto_attach", False)),
         preferred_transport=_optional_str(data.get("preferred_transport")),
@@ -205,6 +223,12 @@ def _render_device_rule(device: DeviceDescriptor, role_counts: dict[str, int]) -
             f"kind = {_toml_string(device.kind)}",
             f"lan_host = {_toml_string(device.address)}",
         ]
+        mac = normalize_mac(device.metadata.get("mac"))
+        if mac:
+            lines.append(f"lan_mac = {_toml_string(mac)}")
+        lan_cidr = device.metadata.get("scan_cidr") or device.metadata.get("configured_cidr")
+        if lan_cidr:
+            lines.append(f"lan_cidr = {_toml_string(lan_cidr)}")
         if ports:
             lines.append(f"lan_ports = [{', '.join(str(port) for port in ports)}]")
         lines.append('preferred_transport = "lan"')

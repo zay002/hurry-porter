@@ -271,7 +271,7 @@ def test_waveshare_can_a_decode_json(capsys):
 def test_scan_json_prints_devices_and_warnings(monkeypatch, capsys):
     monkeypatch.setattr(
         "hurry_porter.cli.scan_devices",
-        lambda config, lan_cidr=None, lan_ports=None: ScanResult(
+        lambda config, lan_cidr=None, lan_ports=None, lan_macs=None: ScanResult(
             devices=[
                 DeviceDescriptor(
                     id="usbipd:3-2",
@@ -292,6 +292,38 @@ def test_scan_json_prints_devices_and_warnings(monkeypatch, capsys):
     assert exit_code == 0
     assert output["devices"][0]["id"] == "usbipd:3-2"
     assert output["warnings"] == ["sample warning"]
+
+
+def test_lan_scan_json_resolves_mac(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "hurry_porter.cli.scan_lan_mac",
+        lambda macs, cidr=None, ports=None: [
+            DeviceDescriptor(
+                id="lan:192.168.1.42:lan_robot",
+                kind="lan_robot",
+                locality="lan",
+                state="present",
+                name="lan_robot",
+                address="192.168.1.42",
+                metadata={"mac": macs[0], "configured_cidr": cidr or ""},
+                transports=[
+                    TransportCandidate(
+                        kind="tcp_ip",
+                        endpoint="192.168.1.42",
+                        priority=1,
+                        latency_class="lan_bound",
+                    )
+                ],
+            )
+        ],
+    )
+
+    exit_code = main(["lan", "scan", "--cidr", "192.168.1.0/24", "--mac", "AA-BB-CC-DD-EE-FF", "--json"])
+    output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert output["devices"][0]["address"] == "192.168.1.42"
+    assert output["devices"][0]["metadata"]["mac"] == "aa:bb:cc:dd:ee:ff"
 
 
 def test_ros_export_json_uses_discovered_devices(monkeypatch, capsys):
@@ -359,7 +391,7 @@ def test_init_prints_default_config(capsys):
 def test_init_from_scan_writes_candidate_config(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "hurry_porter.cli.scan_devices",
-        lambda config, lan_cidr=None, lan_ports=None: ScanResult(
+        lambda config, lan_cidr=None, lan_ports=None, lan_macs=None: ScanResult(
             devices=[
                 DeviceDescriptor(
                     id="usbipd:3-2",

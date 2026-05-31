@@ -7,8 +7,16 @@ import re
 from pathlib import Path
 
 from . import system, usbipd
-from .config import HurryConfig, apply_roles
-from .lan import probe_configured, scan_cidr
+from .config import DeviceRule, HurryConfig, apply_roles
+from .lan import (
+    MacMatch,
+    find_hosts_by_mac,
+    local_ipv4_cidrs,
+    normalize_mac,
+    probe_configured,
+    read_neighbor_table,
+    scan_cidr,
+)
 from .models import DeviceDescriptor, ScanResult, TransportCandidate
 from .serial_setup import scan_windows_com_ports
 
@@ -31,6 +39,7 @@ def scan_devices(
     config: HurryConfig,
     lan_cidr: str | None = None,
     lan_ports: list[int] | None = None,
+    lan_macs: list[str] | None = None,
 ) -> ScanResult:
     warnings: list[str] = []
     devices: list[DeviceDescriptor] = []
@@ -47,6 +56,12 @@ def scan_devices(
     devices.extend(scan_configured_lan(config))
     if lan_cidr and lan_ports:
         devices.extend(scan_lan_cidr(lan_cidr, lan_ports))
+    if lan_macs:
+        if lan_cidr:
+            devices.extend(scan_lan_mac(lan_macs, cidr=lan_cidr, ports=lan_ports or []))
+        else:
+            for cidr in local_ipv4_cidrs() or [None]:
+                devices.extend(scan_lan_mac(lan_macs, cidr=cidr, ports=lan_ports or []))
 
     apply_roles(devices, config)
     return ScanResult(devices=devices, warnings=warnings)
@@ -315,41 +330,28 @@ def scan_wsl_input() -> list[DeviceDescriptor]:
 def scan_configured_lan(config: HurryConfig) -> list[DeviceDescriptor]:
     devices: list[DeviceDescriptor] = []
     for rule in config.lan_rules:
-        probes = probe_configured(rule.lan_host or "", rule.lan_ports)
-        open_ports = [probe.port for probe in probes if probe.open]
-        state = "online" if open_ports else "offline"
-        ports_text = ",".join(str(port) for port in rule.lan_ports)
-        devices.append(
-            DeviceDescriptor(
-                id=f"lan:{rule.lan_host}:{rule.role}",
-                role=rule.role,
-                kind=rule.kind or "lan_robot",
-                locality="lan",
-                state=state,
-                name=rule.role,
-                address=rule.lan_host,
-                metadata={
-                    "configured_ports": ports_text,
-                    "open_ports": ",".join(str(port) for port in open_ports),
-                },
-                transports=[
-                    TransportCandidate(
-                        kind="tcp_ip",
-                        endpoint=f"{rule.lan_host}:{ports_text}",
-                        priority=1,
-                        latency_class="lan_bound",
-                        warnings=[] if open_ports else ["configured LAN endpoint is not reachable"],
-                    )
-                ],
-                recommendation="connect directly from WSL over LAN" if open_ports else "check robot power, subnet, or firewall",
-            )
-        )
+        if rule.lan_mac:
+            devices.extend(scan_configured_lan_mac(rule))
+            continue
+        if rule.lan_host:
+            devices.append(make_lan_rule_device(rule=rule, host=rule.lan_host, mac_match=None))
     return devices
 
 
 def scan_lan_cidr(cidr: str, ports: list[int]) -> list[DeviceDescriptor]:
     devices: list[DeviceDescriptor] = []
+    neighbors = {item.host: item for item in read_neighbor_table()}
     for probe in scan_cidr(cidr, ports):
+        metadata = {"open_port": str(probe.port), "latency_ms": str(probe.latency_ms), "scan_cidr": cidr}
+        neighbor = neighbors.get(probe.host)
+        if neighbor:
+            metadata.update(
+                {
+                    "mac": neighbor.mac,
+                    "mac_source": neighbor.source,
+                    "interface": neighbor.interface or "",
+                }
+            )
         devices.append(
             DeviceDescriptor(
                 id=f"lan:{probe.host}:{probe.port}",
@@ -358,7 +360,7 @@ def scan_lan_cidr(cidr: str, ports: list[int]) -> list[DeviceDescriptor]:
                 state="online",
                 name=f"{probe.host}:{probe.port}",
                 address=probe.host,
-                metadata={"open_port": str(probe.port), "latency_ms": str(probe.latency_ms)},
+                metadata=metadata,
                 transports=[
                     TransportCandidate(
                         kind="tcp_ip",
@@ -371,6 +373,177 @@ def scan_lan_cidr(cidr: str, ports: list[int]) -> list[DeviceDescriptor]:
             )
         )
     return devices
+
+
+def scan_lan_mac(
+    macs: list[str],
+    cidr: str | None = None,
+    ports: list[int] | None = None,
+) -> list[DeviceDescriptor]:
+    devices: list[DeviceDescriptor] = []
+    for mac in macs:
+        normalized = normalize_mac(mac)
+        if not normalized:
+            continue
+        matches = find_hosts_by_mac(normalized, cidr=cidr, ports=ports or [])
+        if not matches:
+            devices.append(make_lan_mac_not_found_device(normalized, cidr=cidr, ports=ports or []))
+            continue
+        for match in matches:
+            rule = DeviceRule(
+                role="lan_robot",
+                kind="lan_robot",
+                lan_mac=normalized,
+                lan_cidr=cidr,
+                lan_ports=ports or [],
+                preferred_transport="lan",
+            )
+            devices.append(make_lan_rule_device(rule=rule, host=match.host, mac_match=match))
+    return devices
+
+
+def scan_configured_lan_mac(rule: DeviceRule) -> list[DeviceDescriptor]:
+    normalized = normalize_mac(rule.lan_mac)
+    if not normalized:
+        return []
+
+    matches = []
+    cidrs = [rule.lan_cidr] if rule.lan_cidr else [None]
+    if not rule.lan_cidr and not rule.lan_host:
+        cidrs = local_ipv4_cidrs() or [None]
+
+    for cidr in cidrs:
+        matches.extend(find_hosts_by_mac(normalized, cidr=cidr, ports=rule.lan_ports))
+        if matches:
+            break
+
+    if matches:
+        return [make_lan_rule_device(rule=rule, host=match.host, mac_match=match) for match in matches]
+    if rule.lan_host:
+        return [make_lan_rule_device(rule=rule, host=rule.lan_host, mac_match=None, mac_unconfirmed=True)]
+    return [make_lan_mac_not_found_device(normalized, cidr=rule.lan_cidr, ports=rule.lan_ports, role=rule.role, kind=rule.kind)]
+
+
+def make_lan_rule_device(
+    rule: DeviceRule,
+    host: str,
+    mac_match: MacMatch | None,
+    mac_unconfirmed: bool = False,
+) -> DeviceDescriptor:
+    probes = probe_configured(host, rule.lan_ports) if rule.lan_ports else []
+    open_ports = [probe.port for probe in probes if probe.open]
+    ports_text = ",".join(str(port) for port in rule.lan_ports)
+    warnings = lan_rule_warnings(rule, host, open_ports, mac_match, mac_unconfirmed)
+    state = lan_rule_state(rule, open_ports, mac_match)
+    metadata = {
+        "configured_ports": ports_text,
+        "open_ports": ",".join(str(port) for port in open_ports),
+    }
+    if rule.lan_cidr:
+        metadata["configured_cidr"] = rule.lan_cidr
+    if rule.lan_host:
+        metadata["configured_host"] = rule.lan_host
+    if rule.lan_mac:
+        metadata["configured_mac"] = normalize_mac(rule.lan_mac) or rule.lan_mac
+    if mac_match:
+        metadata.update(
+            {
+                "mac": mac_match.mac,
+                "mac_source": mac_match.source,
+                "interface": mac_match.interface or "",
+                "neighbor_state": mac_match.state or "",
+            }
+        )
+
+    return DeviceDescriptor(
+        id=f"lan:{host}:{rule.role}",
+        role=rule.role,
+        kind=rule.kind or "lan_robot",
+        locality="lan",
+        state=state,
+        name=rule.role,
+        address=host,
+        metadata=metadata,
+        transports=[
+            TransportCandidate(
+                kind="tcp_ip",
+                endpoint=f"{host}:{ports_text}" if ports_text else host,
+                priority=1,
+                latency_class="lan_bound",
+                warnings=warnings,
+            )
+        ],
+        recommendation=lan_rule_recommendation(open_ports, mac_match, warnings),
+    )
+
+
+def make_lan_mac_not_found_device(
+    mac: str,
+    cidr: str | None = None,
+    ports: list[int] | None = None,
+    role: str = "lan_robot",
+    kind: str | None = "lan_robot",
+) -> DeviceDescriptor:
+    ports_text = ",".join(str(port) for port in ports or [])
+    metadata = {"mac": mac, "configured_mac": mac, "configured_ports": ports_text}
+    if cidr:
+        metadata["configured_cidr"] = cidr
+    return DeviceDescriptor(
+        id=f"lan-mac:{stable_id(mac)}:{role}",
+        role=role,
+        kind=kind or "lan_robot",
+        locality="lan",
+        state="not_found",
+        name=role,
+        metadata=metadata,
+        transports=[
+            TransportCandidate(
+                kind="lan_mac_discovery",
+                endpoint=f"{mac}@{cidr or 'neighbor-table'}",
+                priority=40,
+                latency_class="lan_bound",
+                warnings=["MAC address was not found in the local neighbor table"],
+            )
+        ],
+        recommendation="check robot power, subnet, MAC address, or run with --lan-cidr/--cidr for the correct network",
+    )
+
+
+def lan_rule_state(rule: DeviceRule, open_ports: list[int], mac_match: MacMatch | None) -> str:
+    if open_ports:
+        return "online"
+    if mac_match:
+        return "present"
+    if rule.lan_ports:
+        return "offline"
+    return "configured"
+
+
+def lan_rule_warnings(
+    rule: DeviceRule,
+    host: str,
+    open_ports: list[int],
+    mac_match: MacMatch | None,
+    mac_unconfirmed: bool,
+) -> list[str]:
+    warnings: list[str] = []
+    if rule.lan_ports and not open_ports:
+        warnings.append("configured LAN ports are not reachable" if rule.lan_mac else "configured LAN endpoint is not reachable")
+    if mac_unconfirmed:
+        warnings.append("configured MAC was not confirmed in the local neighbor table")
+    if rule.lan_host and mac_match and host != rule.lan_host:
+        warnings.append(f"MAC resolved to {host}, not configured host {rule.lan_host}")
+    return warnings
+
+
+def lan_rule_recommendation(open_ports: list[int], mac_match: MacMatch | None, warnings: list[str]) -> str:
+    if open_ports:
+        return "connect directly from WSL over LAN"
+    if mac_match and warnings:
+        return "MAC resolved to an IP; verify the robot service port"
+    if mac_match:
+        return "use this resolved IP from ROS or add lan_ports to hurry.toml"
+    return "check robot power, subnet, or firewall"
 
 
 def classify_name(name: str) -> str:

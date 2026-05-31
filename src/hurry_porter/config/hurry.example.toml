@@ -23,5 +23,7 @@ preferred_transport = "usbipd"
 role = "arm_controller"
 kind = "lan_robot"
 lan_host = "192.168.1.10"
+lan_mac = "aa:bb:cc:dd:ee:ff"
+lan_cidr = "192.168.1.0/24"
 lan_ports = [502, 30002]
 preferred_transport = "lan"

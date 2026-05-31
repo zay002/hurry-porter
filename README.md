@@ -4,7 +4,7 @@
 
 面向 **ROS 2 on WSL2** 的硬件接入工具包。`hurry-porter` 负责发现、诊断和连接 Windows 主机上的 USB 串口、USB-CAN、手柄和局域网设备，让 ROS 2 侧拿到可用的端口、`/joy` 输入和 launch 参数。
 
-当前版本：`0.2.0`
+当前版本：`0.2.1`
 
 ## 能力范围
 
@@ -13,7 +13,7 @@
 | USB 串口、USB-CAN、USB 手柄 | 复用 `usbipd-win` attach 到 WSL2 |
 | Waveshare USB-CAN-A | 通过厂商串口协议发送/接收 CAN2.0A/B 帧 |
 | Windows 蓝牙/HID 手柄 | Windows agent -> UDP -> ROS 2 `sensor_msgs/Joy` |
-| LAN 设备 | 从 WSL2 直接探测和导出 endpoint |
+| LAN 设备 | 按 TCP 端口或 MAC 地址发现机械臂 IP，并导出 endpoint |
 | ROS 集成 | 导出 env、JSON、YAML params、launch-file |
 
 不做的事：
@@ -82,6 +82,12 @@ hurry waveshare-can-a send \
 
 `standard` 对应 CAN2.0A 11-bit ID，`extended` 对应 CAN2.0B 29-bit ID。USB 串口默认波特率为 `2000000`。
 
+按 MAC 地址查找局域网机械臂：
+
+```bash
+hurry lan scan --cidr 192.168.1.0/24 --mac aa:bb:cc:dd:ee:ff --ports 502,30002 --json
+```
+
 启动 Windows 手柄桥：
 
 ```bash
@@ -118,6 +124,7 @@ hurry ros export --format launch-file --output launch/hurry.generated.launch.py
 | `hurry watch` | 周期扫描并按配置自动 attach |
 | `hurry serial send` | 向 WSL 串口写入 text/hex 帧 |
 | `hurry waveshare-can-a` | Waveshare USB-CAN-A 配置、发送、接收、解码 |
+| `hurry lan scan` | 按 TCP 端口或 MAC 地址扫描 LAN 设备 |
 | `hurry gamepad status` | 查看手柄路径：WSL native、usbipd、Windows bridge |
 | `hurry gamepad bridge` | 在 WSL 发布 ROS 2 `/joy` |
 | `hurry gamepad start-agent` | 启动 Windows.Gaming.Input agent |
@@ -156,6 +163,8 @@ preferred_transport = "usbipd"
 role = "arm_controller"
 kind = "lan_robot"
 lan_host = "192.168.1.10"
+lan_mac = "aa:bb:cc:dd:ee:ff"
+lan_cidr = "192.168.1.0/24"
 lan_ports = [502, 30002]
 preferred_transport = "lan"
 ```
@@ -169,6 +178,12 @@ CH340/CH341、CP210x、FTDI、PL2303、CDC ACM 通常应先在 Windows 侧安装
 ### Waveshare USB-CAN-A
 
 USB-CAN-A 是 USB-串口-CAN 设备。`hurry waveshare-can-a` 按 Waveshare 串口协议工作，支持 CAN2.0A/B、数据帧、远程帧、variable/fixed 协议和 loopback 模式。
+
+### LAN 机械臂
+
+很多机械臂的 IP 会随路由器变化，但铭牌或网页里会提供 MAC 地址。`hurry-porter` 会读取 WSL 的邻居表，并在指定 CIDR 内做轻量触达来刷新 ARP/neighbor cache；找到 MAC 后输出当前 IP 和已开放端口。
+
+配置里可以只写 `lan_mac` + `lan_cidr`，也可以同时保留一个已知的 `lan_host` 作为兜底。
 
 ### Nintendo Switch Pro Controller
 
@@ -239,6 +254,7 @@ hurry scan --json
 hurry attach <busid>
 hurry serial send --port /dev/ttyUSB0 --baud 115200 --hex "01 02"
 hurry waveshare-can-a send --port /dev/ttyUSB0 --frame-type standard --id 0x123 --data "11 22"
+hurry lan scan --cidr 192.168.1.0/24 --mac aa:bb:cc:dd:ee:ff --ports 502,30002
 hurry gamepad bridge --topic /joy
 hurry gamepad start-agent
 hurry ros export --format params

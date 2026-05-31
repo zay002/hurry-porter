@@ -25,6 +25,7 @@ hurry gamepad agent-command --json >/dev/null
 hurry gamepad decode --json --packet '{"schema":"hurry.gamepad.v1","axes":[0.1,-0.2],"buttons":[1,0]}' >/dev/null
 hurry waveshare-can-a send --port /dev/null --dry-run --json --id 0x123 --data "11 22" >/dev/null
 hurry waveshare-can-a decode --json --hex "aa c2 03 01 11 22 55" >/dev/null
+hurry lan scan --cidr 127.0.0.0/30 --mac aa:bb:cc:dd:ee:ff --json >/dev/null
 hurry scan --json >/dev/null
 hurry watch --once --json --no-attach >/dev/null
 hurry ros export --format json >/dev/null

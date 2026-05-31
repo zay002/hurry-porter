@@ -62,6 +62,37 @@ path_regex = "/dev/serial/by-id/usb-Example"
     assert config.rules[0].matches(device)
 
 
+def test_config_parses_lan_mac_and_cidr(tmp_path):
+    config_path = tmp_path / "hurry.toml"
+    config_path.write_text(
+        """
+[[devices]]
+role = "arm_controller"
+kind = "lan_robot"
+lan_mac = "AA-BB-CC-DD-EE-FF"
+lan_cidr = "192.168.1.0/24"
+lan_ports = [502, 30002]
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(str(config_path))
+    device = DeviceDescriptor(
+        id="lan:192.168.1.20:arm_controller",
+        kind="lan_robot",
+        locality="lan",
+        state="present",
+        name="arm_controller",
+        address="192.168.1.20",
+        metadata={"mac": "aa:bb:cc:dd:ee:ff"},
+    )
+
+    assert len(config.lan_rules) == 1
+    assert config.rules[0].lan_mac == "AA-BB-CC-DD-EE-FF"
+    assert config.rules[0].lan_cidr == "192.168.1.0/24"
+    assert config.rules[0].matches(device)
+
+
 def test_example_config_loads():
     example = Path(__file__).resolve().parents[1] / "config" / "hurry.example.toml"
 
@@ -90,7 +121,7 @@ def test_render_config_from_devices_generates_candidate_rules():
             state="online",
             name="192.168.1.10:502",
             address="192.168.1.10",
-            metadata={"open_port": "502"},
+            metadata={"open_port": "502", "mac": "aa:bb:cc:dd:ee:ff", "scan_cidr": "192.168.1.0/24"},
         ),
     ]
 
@@ -100,4 +131,6 @@ def test_render_config_from_devices_generates_candidate_rules():
     assert 'vid = "1a86"' in rendered
     assert "auto_attach = true" in rendered
     assert 'lan_host = "192.168.1.10"' in rendered
+    assert 'lan_mac = "aa:bb:cc:dd:ee:ff"' in rendered
+    assert 'lan_cidr = "192.168.1.0/24"' in rendered
     assert "lan_ports = [502]" in rendered

@@ -7,7 +7,7 @@ import sys
 import time
 
 from .config import load_config, render_config_from_devices, render_default_config
-from .devices import scan_devices
+from .devices import scan_devices, scan_lan_cidr, scan_lan_mac
 from .doctor import collect_doctor_report
 from .gamepad_bridge import (
     DEFAULT_AGENT_INDEX,
@@ -23,7 +23,7 @@ from .gamepad_bridge import (
     run_agent_command,
     run_ros_bridge,
 )
-from .models import DeviceDescriptor, to_jsonable
+from .models import DeviceDescriptor, ScanResult, to_jsonable
 from .ros_export import render_exports
 from .serial_io import (
     SerialIoError,
@@ -78,6 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--json", action="store_true", help="Print machine-readable init output")
     init.add_argument("--lan-cidr", help="Optional CIDR to actively probe with --from-scan")
     init.add_argument("--lan-ports", default="", help="Comma-separated ports used with --lan-cidr")
+    init.add_argument("--lan-mac", action="append", default=[], help="MAC address to resolve while scanning LAN")
     init.set_defaults(handler=cmd_init)
 
     doctor = sub.add_parser("doctor", help="Check WSL2, ROS, usbipd-win, and device prerequisites")
@@ -90,7 +91,17 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--json", action="store_true", help="Print machine-readable scan output")
     scan.add_argument("--lan-cidr", help="Optional CIDR to actively probe, e.g. 192.168.1.0/24")
     scan.add_argument("--lan-ports", default="", help="Comma-separated ports used with --lan-cidr")
+    scan.add_argument("--lan-mac", action="append", default=[], help="MAC address to resolve, repeat or comma-separate")
     scan.set_defaults(handler=cmd_scan)
+
+    lan = sub.add_parser("lan", help="LAN robot discovery helpers")
+    lan_sub = lan.add_subparsers(dest="lan_command")
+    lan_scan = lan_sub.add_parser("scan", help="Find LAN devices by TCP ports and/or MAC address")
+    lan_scan.add_argument("--cidr", help="CIDR to scan, e.g. 192.168.1.0/24")
+    lan_scan.add_argument("--ports", default="", help="Comma-separated TCP ports to probe")
+    lan_scan.add_argument("--mac", action="append", default=[], help="MAC address to resolve, repeat or comma-separate")
+    lan_scan.add_argument("--json", action="store_true", help="Print machine-readable LAN scan output")
+    lan_scan.set_defaults(handler=cmd_lan_scan)
 
     attach = sub.add_parser("attach", help="Attach USB devices to WSL through usbipd-win")
     attach.add_argument("--config", help="Path to hurry.toml")
@@ -232,7 +243,11 @@ def add_gamepad_agent_args(parser: argparse.ArgumentParser) -> None:
 def cmd_init(args: argparse.Namespace) -> int:
     if args.from_scan:
         config = load_config(args.config)
-        scan = scan_devices(config, lan_cidr=args.lan_cidr, lan_ports=parse_ports(args.lan_ports))
+        try:
+            lan_macs = parse_macs(args.lan_mac)
+        except ValueError as exc:
+            return print_error(str(exc), args.json)
+        scan = scan_devices(config, lan_cidr=args.lan_cidr, lan_ports=parse_ports(args.lan_ports), lan_macs=lan_macs)
         content = render_config_from_devices(scan.devices)
     else:
         content = render_default_config()
@@ -287,13 +302,47 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 def cmd_scan(args: argparse.Namespace) -> int:
     config = load_config(args.config)
-    result = scan_devices(config, lan_cidr=args.lan_cidr, lan_ports=parse_ports(args.lan_ports))
+    try:
+        lan_macs = parse_macs(args.lan_mac)
+    except ValueError as exc:
+        return print_error(str(exc), args.json)
+    result = scan_devices(config, lan_cidr=args.lan_cidr, lan_ports=parse_ports(args.lan_ports), lan_macs=lan_macs)
     if args.json:
         print(json.dumps(to_jsonable(result), indent=2, sort_keys=True))
     else:
         print_scan_table(result.devices)
         for warning in result.warnings:
             print(f"warn {warning}", file=sys.stderr)
+    return 0
+
+
+def cmd_lan_scan(args: argparse.Namespace) -> int:
+    try:
+        ports = parse_ports(args.ports) or []
+        macs = parse_macs(args.mac)
+    except ValueError as exc:
+        return print_error(str(exc), args.json)
+
+    if not ports and not macs:
+        return print_error("lan scan requires --ports, --mac, or both", args.json)
+    if ports and not args.cidr and not macs:
+        return print_error("--ports requires --cidr unless it is used with --mac", args.json)
+    if args.cidr and ports:
+        devices = scan_lan_cidr(args.cidr, ports)
+    else:
+        devices = []
+    if macs:
+        from .lan import local_ipv4_cidrs
+
+        cidrs = [args.cidr] if args.cidr else local_ipv4_cidrs() or [None]
+        for cidr in cidrs:
+            devices.extend(scan_lan_mac(macs, cidr=cidr, ports=ports))
+
+    payload = ScanResult(devices=devices, warnings=[])
+    if args.json:
+        print(json.dumps(to_jsonable(payload), indent=2, sort_keys=True))
+    else:
+        print_scan_table(devices)
     return 0
 
 
@@ -802,6 +851,24 @@ def parse_ports(value: str) -> list[int] | None:
     if not value:
         return None
     return [int(item.strip()) for item in value.split(",") if item.strip()]
+
+
+def parse_macs(values: list[str] | None) -> list[str] | None:
+    if not values:
+        return None
+    from .lan import normalize_mac
+
+    macs: list[str] = []
+    for value in values:
+        for item in value.split(","):
+            if not item.strip():
+                continue
+            mac = normalize_mac(item)
+            if not mac:
+                raise ValueError(f"invalid MAC address: {item}")
+            if mac not in macs:
+                macs.append(mac)
+    return macs or None
 
 
 def attach_device(device: DeviceDescriptor, dry_run: bool = False, elevate: bool = False) -> dict[str, object]:

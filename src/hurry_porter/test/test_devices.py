@@ -3,10 +3,11 @@ from hurry_porter.devices import (
     parse_windows_gamepads,
     scan_configured_lan,
     scan_lan_cidr,
+    scan_lan_mac,
     scan_windows_gamepads,
     scan_windows_serial_ports,
 )
-from hurry_porter.lan import ProbeResult
+from hurry_porter.lan import MacMatch, ProbeResult
 from hurry_porter.serial_setup import WindowsComPort
 from hurry_porter.system import CommandResult
 from hurry_porter.models import DeviceDescriptor
@@ -70,6 +71,37 @@ def test_scan_configured_lan_marks_online_and_offline(monkeypatch):
     assert devices[1].transports[0].warnings == ["configured LAN endpoint is not reachable"]
 
 
+def test_scan_configured_lan_resolves_mac_to_ip(monkeypatch):
+    monkeypatch.setattr(
+        "hurry_porter.devices.find_hosts_by_mac",
+        lambda mac, cidr=None, ports=None: [
+            MacMatch(host="192.168.1.42", mac="aa:bb:cc:dd:ee:ff", source="ip_neigh", interface="eth0", state="reachable")
+        ],
+    )
+    monkeypatch.setattr(
+        "hurry_porter.devices.probe_configured",
+        lambda host, ports: [ProbeResult(host=host, port=502, open=True, latency_ms=2.5)],
+    )
+    config = HurryConfig(
+        rules=[
+            DeviceRule(
+                role="arm_controller",
+                kind="lan_robot",
+                lan_mac="AA-BB-CC-DD-EE-FF",
+                lan_cidr="192.168.1.0/24",
+                lan_ports=[502],
+            )
+        ]
+    )
+
+    devices = scan_configured_lan(config)
+
+    assert devices[0].address == "192.168.1.42"
+    assert devices[0].state == "online"
+    assert devices[0].metadata["mac"] == "aa:bb:cc:dd:ee:ff"
+    assert devices[0].metadata["mac_source"] == "ip_neigh"
+
+
 def test_scan_lan_cidr_converts_open_probes_to_devices(monkeypatch):
     monkeypatch.setattr(
         "hurry_porter.devices.scan_cidr",
@@ -81,6 +113,16 @@ def test_scan_lan_cidr_converts_open_probes_to_devices(monkeypatch):
     assert devices[0].id == "lan:192.168.1.20:502"
     assert devices[0].metadata["latency_ms"] == "3.4"
     assert devices[0].transports[0].endpoint == "192.168.1.20:502"
+
+
+def test_scan_lan_mac_returns_not_found_device(monkeypatch):
+    monkeypatch.setattr("hurry_porter.devices.find_hosts_by_mac", lambda mac, cidr=None, ports=None: [])
+
+    devices = scan_lan_mac(["aa:bb:cc:dd:ee:ff"], cidr="192.168.1.0/24", ports=[502])
+
+    assert devices[0].id == "lan-mac:aa_bb_cc_dd_ee_ff:lan_robot"
+    assert devices[0].state == "not_found"
+    assert devices[0].metadata["configured_cidr"] == "192.168.1.0/24"
 
 
 def test_parse_windows_gamepads_prefers_named_controller():
